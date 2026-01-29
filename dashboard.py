@@ -11,7 +11,7 @@ def check_password():
         st.title("🔐 Accesso Riservato")
         pw = st.text_input("Inserisci la password", type="password")
         if st.button("Accedi"):
-            if pw == "TUA_PASSWORD": # Sostituisci con la tua pass
+            if pw == "elgnaro": # Sostituisci con la tua pass
                 st.session_state.password_correct = True
                 st.rerun()
             else:
