@@ -5,12 +5,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
 
-# Proviamo l'import con gestione dell'errore per darti feedback immediato
+# --- NUOVO IMPORT CORRETTO PER GOOGLE-GENAI ---
 try:
     from google import genai
-    AI_AVAILABLE = True
+    # Se l'import sopra fallisce su certi sistemi, questo è il backup
 except ImportError:
-    AI_AVAILABLE = False
+    import google.genai as genai
 
 # ==========================================
 # 1. CONFIGURAZIONE & LOGICA DATI
@@ -65,19 +65,22 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
 # ==========================================
 # CONFIGURAZIONE AI
 # ==========================================
-if AI_AVAILABLE:
-    # Inserisci qui la tua chiave
+# Inizializzazione diretta e sicura
+try:
     client = genai.Client(api_key="AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY")
-else:
-    st.error("Errore: La libreria 'google-genai' non è stata installata correttamente. Controlla i Requirements.")
+    AI_READY = True
+except Exception as e:
+    st.sidebar.warning(f"AI non pronta: {e}")
+    AI_READY = False
 
 def chiedi_a_gemini(sintesi_dati):
-    if not AI_AVAILABLE:
-        return "Servizio AI non configurato correttamente."
+    if not AI_READY:
+        return "Servizio AI non disponibile al momento."
     try:
+        # Nota: con la versione 0.3.0 la sintassi è questa
         response = client.models.generate_content(
             model="gemini-1.5-flash",
-            contents=f"Sei un coach sportivo. Analizza: {sintesi_dati}. Rispondi in italiano."
+            contents=f"Sei un coach sportivo esperto. Analizza questi dati e rispondi in italiano: {sintesi_dati}"
         )
         return response.text
     except Exception as e:
