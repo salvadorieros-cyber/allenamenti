@@ -56,30 +56,30 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
     elif fc <= z4: return "Z4 (Soglia)"
     else: return "Z5 (Massimale)"
 
+import streamlit as st
+import google.generativeai as genai # Torniamo a questo import ma con la logica aggiornata
 
 # ==========================================
-# CONFIGURAZIONE AI - NUOVA LIBRERIA 2026
+# CONFIGURAZIONE AI - VERSIONE COMPATIBILE
 # ==========================================
-client = genai.Client(api_key="AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY")
+genai.configure(api_key="AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY")
 
 def chiedi_a_gemini(sintesi_dati):
     try:
-        # Prompt per il Coach
-        prompt_coach = f"""
-        Sei un esperto coach sportivo. Analizza questi dati:
+        # Inizializziamo il modello direttamente
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = f"""
+        Sei un esperto coach sportivo. Analizza questi dati e fornisci un feedback 
+        tecnico, motivante e professionale in italiano:
         {sintesi_dati}
-        Fornisci un commento tecnico su forma ed efficienza in italiano.
         """
         
-        # Chiamata con la nuova sintassi semplificata
-        response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt_coach
-        )
-        
+        # Chiamata semplice
+        response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"Errore Coach AI (Nuova Libreria): {e}"
+        return f"Errore Coach AI: {str(e)}"
 # ==========================================
 # 2. ACCESSO
 # ==========================================
