@@ -88,7 +88,7 @@ def assegna_zona(fc, z1, z2, z3, z4):
 # ==========================================
 def chiedi_a_gemini(sintesi):
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("models/text-bison-002")
 
         prompt = f"""
 Sei un coach di endurance esperto.
@@ -99,7 +99,7 @@ Dati sintetici atleta:
 Analizza:
 1. Stato di forma ed efficienza aerobica
 2. Distribuzione delle zone cardiache
-3. Suggerimenti pratici per migliorare la performance
+3. Suggerimenti pratici per i prossimi allenamenti
 
 Rispondi in italiano, in modo tecnico ma chiaro.
 """
