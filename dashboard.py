@@ -2,9 +2,10 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 # ==========================================
-# 1. FUNZIONI LOGICHE (Ex funzioni_dati.py)
+# 1. FUNZIONI LOGICHE
 # ==========================================
 @st.cache_data
 def load_data():
@@ -19,7 +20,6 @@ def load_data():
         
         df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
         
-        # Pulizia numerica universale
         cols_num = ['Calorie', 'FC Media', 'FC max', 'TE aerobico', 'Cadenza media', 'Distanza', 'Ascesa totale']
         for col in cols_num:
             if col in df.columns:
@@ -53,7 +53,7 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
     else: return "Z5 (Massimale)"
 
 # ==========================================
-# 2. INTERFACCIA E SICUREZZA (Ex interfaccia.py)
+# 2. INTERFACCIA E SICUREZZA
 # ==========================================
 def check_password():
     if "password_correct" not in st.session_state:
@@ -81,7 +81,6 @@ if check_password():
         # --- SIDEBAR ---
         st.sidebar.header("🎯 Filtri Attività")
         sport = st.sidebar.multiselect("Sport", sorted(df['Tipo di attivita'].unique()), default=df['Tipo di attivita'].unique())
-        
         date_range = st.sidebar.date_input("Periodo", [df['Data'].min().date(), df['Data'].max().date()])
         
         st.sidebar.markdown("---")
@@ -117,7 +116,7 @@ if check_password():
             (df['Ascesa totale'].between(f_disl[0], f_disl[1])) &
             (df['TE aerobico'].between(f_te[0], f_te[1]))
         )
-        df_f = df.loc[mask].sort_values(by='Data', ascending=False)
+        df_f = df.loc[mask].sort_values(by='Data')
 
         # --- VISUALIZZAZIONE ---
         st.title("🏃 Dashboard Analisi Fitness")
@@ -129,11 +128,53 @@ if check_password():
             c3.metric("Kcal Totali", f"{int(df_f['Calorie'].sum())}")
             c4.metric("Tempo Tot", f"{df_f['Tempo_Minuti'].sum()/60:.1f} h")
 
-            tabs = st.tabs(["🚀 Trend Passo", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone Cardio", "📋 Dati"])
+            tabs = st.tabs(["🚀 Trend Passo & FC", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone Cardio", "📋 Dati"])
             
             with tabs[0]:
-                fig = px.line(df_f.sort_values('Data'), x='Data', y='Passo_Decimale', color='Tipo di attivita', markers=True, template="plotly_dark")
-                fig.update_yaxes(autorange="reversed", title="Passo (min/km)")
+                st.subheader("Relazione tra Passo e Frequenza Cardiaca Media")
+                
+                # Creazione grafico con doppio asse Y
+                fig = go.Figure()
+
+                # Aggiunta linea Passo (Asse Y1)
+                fig.add_trace(go.Scatter(
+                    x=df_f['Data'], y=df_f['Passo_Decimale'],
+                    name="Passo (min/km)",
+                    mode='lines+markers',
+                    line=dict(color='#00CC96', width=3),
+                    yaxis="y1"
+                ))
+
+                # Aggiunta linea FC Media (Asse Y2)
+                fig.add_trace(go.Scatter(
+                    x=df_f['Data'], y=df_f['FC Media'],
+                    name="FC Media (bpm)",
+                    mode='lines+markers',
+                    line=dict(color='#EF553B', width=3, dash='dot'),
+                    yaxis="y2"
+                ))
+
+                # Layout con due assi
+                fig.update_layout(
+                    template="plotly_dark",
+                    hovermode="x unified",
+                    xaxis=dict(title="Data"),
+                    yaxis=dict(
+                        title="Passo (min/km)",
+                        titlefont=dict(color="#00CC96"),
+                        tickfont=dict(color="#00CC96"),
+                        autorange="reversed" # Passo invertito: più basso è in alto
+                    ),
+                    yaxis2=dict(
+                        title="FC Media (bpm)",
+                        titlefont=dict(color="#EF553B"),
+                        tickfont=dict(color="#EF553B"),
+                        anchor="x",
+                        overlaying="y",
+                        side="right"
+                    ),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
                 st.plotly_chart(fig, use_container_width=True)
                 
             with tabs[1]:
@@ -141,12 +182,11 @@ if check_password():
                 st.plotly_chart(fig_te, use_container_width=True)
 
             with tabs[2]:
-                fig_fc = px.line(df_f.sort_values('Data'), x='Data', y=['FC Media', 'FC max'], markers=True, template="plotly_dark")
+                fig_fc = px.line(df_f, x='Data', y=['FC Media', 'FC max'], markers=True, template="plotly_dark")
                 st.plotly_chart(fig_fc, use_container_width=True)
 
             with tabs[3]:
-                st.subheader("Performance per Zona Cardio")
-                
+                st.subheader("Distribuzione Passo per Zona Cardio")
                 fig_z = px.box(df_f, x='Zona Cardio', y='Passo_Decimale', color='Zona Cardio', 
                               category_orders={"Zona Cardio": zone_labels},
                               template="plotly_dark")
