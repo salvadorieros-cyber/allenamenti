@@ -6,13 +6,12 @@ import plotly.graph_objects as go
 from datetime import timedelta
 import google.generativeai as genai
 
-# Configurazione API Gemini
+# ==========================================
+# 1. CONFIGURAZIONE & LOGICA DATI
+# ==========================================
 GOOGLE_API_KEY = "AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY"
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# ==========================================
-# 1. LOGICA DATI
-# ==========================================
 @st.cache_data
 def load_data():
     try:
@@ -21,7 +20,7 @@ def load_data():
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = cursor.fetchall()
         table_name = tables[0][0]
-        df = pd.to_sql_query = pd.read_sql_query(f"SELECT * FROM '{table_name}'", conn)
+        df = pd.read_sql_query(f"SELECT * FROM '{table_name}'", conn)
         conn.close()
         
         df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
@@ -57,30 +56,24 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
     elif fc <= z4: return "Z4 (Soglia)"
     else: return "Z5 (Massimale)"
 
-# ==========================================
-# 2. FUNZIONE ANALISI AI
-# ==========================================
 def chiedi_a_gemini(sintesi_dati):
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Usiamo 'gemini-pro' che è il più compatibile universalmente
+        model = genai.GenerativeModel('gemini-pro')
         prompt = f"""
-        Sei un esperto coach sportivo. Analizza i seguenti dati di allenamento di un atleta e fornisci:
-        1. Un commento sullo stato di forma attuale.
-        2. Un consiglio tecnico specifico per migliorare l'efficienza.
-        3. Eventuali segnali di allarme (overtraining o stallo).
-        
-        Dati dell'atleta (ultimi 30 giorni vs storico):
+        Sei un esperto coach sportivo. Analizza questi dati di allenamento:
         {sintesi_dati}
         
-        Sii conciso, professionale e motivante. Rispondi in italiano.
+        Fornisci un commento sullo stato di forma, un consiglio tecnico e segnali di stallo.
+        Rispondi in italiano in modo professionale.
         """
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"L'AI sta riposando... (Errore: {e})"
+        return f"Errore nell'interrogazione AI: {e}"
 
 # ==========================================
-# 3. DASHBOARD
+# 2. ACCESSO
 # ==========================================
 if "password_correct" not in st.session_state:
     st.session_state.password_correct = False
@@ -93,32 +86,56 @@ if not st.session_state.password_correct:
             st.session_state.password_correct = True
             st.rerun()
 else:
+    # --- DASHBOARD ATTIVA ---
     st.set_page_config(page_title="Fitness AI Dashboard", layout="wide")
     df = load_data()
 
     if not df.empty:
-        # SIDEBAR
-        st.sidebar.header("🎯 Filtri")
+        # --- SIDEBAR (RIPRISTINATA) ---
+        st.sidebar.header("🎯 Filtri Attività")
         sport = st.sidebar.multiselect("Sport", sorted(df['Tipo di attivita'].unique()), default=df['Tipo di attivita'].unique())
         date_range = st.sidebar.date_input("Periodo", [df['Data'].min().date(), df['Data'].max().date()])
         
         st.sidebar.markdown("---")
-        st.sidebar.subheader("⚙️ Zone BPM")
+        st.sidebar.subheader("⚙️ Soglie Cardio (BPM)")
         z1 = st.sidebar.number_input("Fine Z1", value=130)
         z2 = st.sidebar.number_input("Fine Z2", value=145)
         z3 = st.sidebar.number_input("Fine Z3", value=160)
         z4 = st.sidebar.number_input("Fine Z4", value=175)
         
-        # ELABORAZIONE
+        zone_labels = ["Z1 (Recupero)", "Z2 (Fondo)", "Z3 (Tempo)", "Z4 (Soglia)", "Z5 (Massimale)"]
+        scelta_zone = st.sidebar.multiselect("Mostra Zone", zone_labels, default=zone_labels)
+
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📊 Filtri Performance")
+        def q_slider(label, col, key):
+            m1, m2 = float(df[col].min()), float(df[col].max())
+            if m1 == m2: m2 = m1 + 1.0
+            return st.sidebar.slider(label, m1, m2, (m1, m2), key=key)
+
+        f_cal = q_slider("🔥 Calorie", 'Calorie', "f_cal")
+        f_disl = q_slider("⛰️ Dislivello (m)", 'Ascesa totale', "f_disl")
+        f_te = q_slider("📈 TE Aerobico", 'TE aerobico', "f_te")
+
+        # --- ELABORAZIONE DATI ---
         df['Zona Cardio'] = df['FC Media'].apply(lambda x: assegna_zona_custom(x, z1, z2, z3, z4))
-        mask = (df['Tipo di attivita'].isin(sport)) & (df['Data'].dt.date >= date_range[0]) & (df['Data'].dt.date <= (date_range[1] if len(date_range)>1 else date_range[0]))
+        
+        mask = (
+            (df['Tipo di attivita'].isin(sport)) &
+            (df['Zona Cardio'].isin(scelta_zone)) &
+            (df['Data'].dt.date >= date_range[0]) &
+            (df['Data'].dt.date <= (date_range[1] if len(date_range)>1 else date_range[0])) &
+            (df['Calorie'].between(f_cal[0], f_cal[1])) &
+            (df['Ascesa totale'].between(f_disl[0], f_disl[1])) &
+            (df['TE aerobico'].between(f_te[0], f_te[1]))
+        )
         df_f = df.loc[mask].sort_values(by='Data')
 
-        st.title("🏃 Analisi Performance con AI")
-        
-        tabs = st.tabs(["🚀 Trend", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone", "🤖 COACH AI PROGRESSI", "📋 Dati"])
+        # --- TABS ---
+        tabs = st.tabs(["🚀 Trend Passo & FC", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone", "🤖 COACH AI", "📋 Dati"])
         
         with tabs[0]:
+            st.subheader("Relazione tra Velocità e Sforzo")
             df_p = df_f.dropna(subset=['Passo_Decimale', 'FC Media'])
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=df_p['Data'], y=df_p['Passo_Decimale'], name="Passo", yaxis="y1", line=dict(color='#00CC96')))
@@ -126,47 +143,39 @@ else:
             fig.update_layout(template="plotly_dark", yaxis=dict(title="Passo", autorange="reversed"), yaxis2=dict(title="FC", side="right", overlaying="y", showgrid=False))
             st.plotly_chart(fig, use_container_width=True)
 
+        with tabs[1]:
+            st.plotly_chart(px.scatter(df_f, x='Tempo_Minuti', y='TE aerobico', color='Tipo di attivita', size='Calorie', trendline="ols", template="plotly_dark"), use_container_width=True)
+
         with tabs[3]:
-            fig_z = px.box(df_f, x='Zona Cardio', y='Passo_Decimale', color='Zona Cardio', template="plotly_dark")
+            fig_z = px.box(df_f, x='Zona Cardio', y='Passo_Decimale', color='Zona Cardio', category_orders={"Zona Cardio": zone_labels}, template="plotly_dark")
             fig_z.update_yaxes(autorange="reversed")
             st.plotly_chart(fig_z, use_container_width=True)
 
-        # --- TAB 4: IL CUORE DELL'INTEGRAZIONE AI ---
         with tabs[4]:
-            st.header("🤖 Analisi Intelligente Gemini AI")
+            st.header("🤖 Analisi Coach Gemini AI")
+            df_f['Indice_Eff'] = (1 / df_f['Passo_Decimale'].replace(0, 1)) / df_f['FC Media'] * 1000
             
-            df_f['Indice_Eff'] = (1 / df_f['Passo_Decimale']) / df_f['FC Media'] * 1000
             data_taglio = df_f['Data'].max() - timedelta(days=30)
             recenti = df_f[df_f['Data'] >= data_taglio]
             storici = df_f[df_f['Data'] < data_taglio]
             
-            if not recenti.empty and not storici.empty:
-                eff_r, eff_s = recenti['Indice_Eff'].mean(), storici['Indice_Eff'].mean()
-                delta = ((eff_r - eff_s) / eff_s) * 100
+            if not recenti.empty:
+                eff_r = recenti['Indice_Eff'].mean()
+                delta = ((eff_r - storici['Indice_Eff'].mean()) / storici['Indice_Eff'].mean() * 100) if not storici.empty else 0
                 
-                # Prepariamo la sintesi per l'AI
-                sintesi = f"""
-                - Sport analizzati: {sport}
-                - Numero attività recenti: {len(recenti)}
-                - Efficienza Aerobica attuale: {eff_r:.2f} (Variazione: {delta:.1f}%)
-                - Tempo totale recente: {int(recenti['Tempo_Minuti'].sum())} minuti
-                - Distribuzione Zone: {recenti['Zona Cardio'].value_counts(normalize=True).to_dict()}
-                - FC Media recente: {recenti['FC Media'].mean():.0f} bpm
-                """
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Efficienza", f"{eff_r:.2f}", f"{delta:.1f}%")
+                c2.metric("Attività (30gg)", len(recenti))
+                c3.metric("FC Media", f"{int(recenti['FC Media'].mean())}")
+
+                if st.button("🚀 Chiedi parere al Coach AI"):
+                    sintesi = f"Efficienza: {eff_r:.2f}, Delta: {delta:.1f}%, Zone: {recenti['Zona Cardio'].value_counts().to_dict()}"
+                    with st.spinner("Analisi in corso..."):
+                        st.info(chiedi_a_gemini(sintesi))
                 
-                if st.button("Genera Analisi Coach AI"):
-                    with st.spinner("Gemini sta analizzando i tuoi progressi..."):
-                        risposta = chiedi_a_gemini(sintesi)
-                        st.markdown("---")
-                        st.subheader("📋 Il responso del Coach")
-                        st.write(risposta)
-                
-                st.markdown("---")
-                st.metric("Indice Efficienza (Salire = Migliorare)", f"{eff_r:.2f}", f"{delta:.1f}%")
-                fig_eff = px.scatter(df_f, x='Data', y='Indice_Eff', trendline="ols", template="plotly_dark")
-                st.plotly_chart(fig_eff, use_container_width=True)
+                st.plotly_chart(px.scatter(df_f, x='Data', y='Indice_Eff', trendline="ols", template="plotly_dark"), use_container_width=True)
             else:
-                st.info("Carica almeno 30 giorni di dati per attivare l'analisi AI.")
+                st.info("Dati insufficienti per il report AI.")
 
         with tabs[5]:
-            st.dataframe(df_f.drop(columns=['Tempo_TD', 'Passo_Decimale', 'Indice_Eff']), use_container_width=True)
+            st.dataframe(df_f.drop(columns=['Indice_Eff']) if 'Indice_Eff' in df_f.columns else df_f, use_container_width=True)
