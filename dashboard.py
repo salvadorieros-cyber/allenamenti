@@ -133,49 +133,59 @@ if check_password():
             with tabs[0]:
                 st.subheader("Relazione tra Passo e Frequenza Cardiaca Media")
                 
-                # Creazione grafico con doppio asse Y
-                fig = go.Figure()
+                # Creiamo una copia per il grafico ed eliminiamo righe con dati mancanti per queste due colonne
+                df_plot = df_f.dropna(subset=['Passo_Decimale', 'FC Media']).sort_values('Data')
 
-                # Aggiunta linea Passo (Asse Y1)
-                fig.add_trace(go.Scatter(
-                    x=df_f['Data'], y=df_f['Passo_Decimale'],
-                    name="Passo (min/km)",
-                    mode='lines+markers',
-                    line=dict(color='#00CC96', width=3),
-                    yaxis="y1"
-                ))
+                if not df_plot.empty:
+                    fig = go.Figure()
 
-                # Aggiunta linea FC Media (Asse Y2)
-                fig.add_trace(go.Scatter(
-                    x=df_f['Data'], y=df_f['FC Media'],
-                    name="FC Media (bpm)",
-                    mode='lines+markers',
-                    line=dict(color='#EF553B', width=3, dash='dot'),
-                    yaxis="y2"
-                ))
+                    # Aggiunta linea Passo (Asse Y1)
+                    fig.add_trace(go.Scatter(
+                        x=df_plot['Data'], 
+                        y=df_plot['Passo_Decimale'],
+                        name="Passo (min/km)",
+                        mode='lines+markers',
+                        line=dict(color='#00CC96', width=3),
+                        yaxis="y1",
+                        hovertemplate="Data: %{x}<br>Passo: %{y:.2f} min/km<extra></extra>"
+                    ))
 
-                # Layout con due assi
-                fig.update_layout(
-                    template="plotly_dark",
-                    hovermode="x unified",
-                    xaxis=dict(title="Data"),
-                    yaxis=dict(
-                        title="Passo (min/km)",
-                        titlefont=dict(color="#00CC96"),
-                        tickfont=dict(color="#00CC96"),
-                        autorange="reversed" # Passo invertito: più basso è in alto
-                    ),
-                    yaxis2=dict(
-                        title="FC Media (bpm)",
-                        titlefont=dict(color="#EF553B"),
-                        tickfont=dict(color="#EF553B"),
-                        anchor="x",
-                        overlaying="y",
-                        side="right"
-                    ),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                    # Aggiunta linea FC Media (Asse Y2)
+                    fig.add_trace(go.Scatter(
+                        x=df_plot['Data'], 
+                        y=df_plot['FC Media'],
+                        name="FC Media (bpm)",
+                        mode='lines+markers',
+                        line=dict(color='#EF553B', width=3, dash='dot'),
+                        yaxis="y2",
+                        hovertemplate="Data: %{x}<br>FC: %{y} bpm<extra></extra>"
+                    ))
+
+                    # Layout con gestione sicura degli assi
+                    fig.update_layout(
+                        template="plotly_dark",
+                        hovermode="x unified",
+                        xaxis=dict(title="Data", type='date'),
+                        yaxis=dict(
+                            title="Passo (min/km)",
+                            titlefont=dict(color="#00CC96"),
+                            tickfont=dict(color="#00CC96"),
+                            autorange="reversed"  # Mette i passi più veloci (numeri bassi) in alto
+                        ),
+                        yaxis2=dict(
+                            title="FC Media (bpm)",
+                            titlefont=dict(color="#EF553B"),
+                            tickfont=dict(color="#EF553B"),
+                            anchor="x",
+                            overlaying="y",
+                            side="right",
+                            showgrid=False # Evita confusione con le griglie dell'asse Y1
+                        ),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Dati insufficienti (Passo o FC mancanti) per generare questo grafico.")
                 
             with tabs[1]:
                 fig_te = px.scatter(df_f, x='Tempo_Minuti', y='TE aerobico', color='Tipo di attivita', size='Calorie', trendline="ols", template="plotly_dark")
