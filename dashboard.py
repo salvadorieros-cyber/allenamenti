@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from datetime import timedelta
 
 # ==========================================
-# 1. FUNZIONI LOGICHE & ALGORITMO
+# 1. LOGICA DATI & ALGORITMO
 # ==========================================
 @st.cache_data
 def load_data():
@@ -21,6 +21,7 @@ def load_data():
         
         df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
         
+        # Pulizia numerica
         cols_num = ['Calorie', 'FC Media', 'FC max', 'TE aerobico', 'Cadenza media', 'Distanza', 'Ascesa totale']
         for col in cols_num:
             if col in df.columns:
@@ -41,12 +42,9 @@ def load_data():
                 except: return None
             df['Passo_Decimale'] = df['Passo medio'].apply(passo_a_decimale)
             
-        # Calcolo Indice Efficienza (Passo * FC) -> Più è basso, meglio è
-        df['Efficienza'] = (df['Passo_Decimale'] * df['FC Media']).round(2)
-            
         return df.dropna(subset=['Data'])
     except Exception as e:
-        st.error(f"Errore caricamento database: {e}")
+        st.error(f"Errore caricamento: {e}")
         return pd.DataFrame()
 
 def assegna_zona_custom(fc, z1, z2, z3, z4):
@@ -64,8 +62,8 @@ def check_password():
         st.session_state.password_correct = False
     if not st.session_state.password_correct:
         st.title("🔐 Accesso Riservato")
-        pw = st.text_input("Password", type="password")
-        if st.button("Accedi"):
+        pw = st.text_input("Inserisci la chiave di accesso", type="password")
+        if st.button("Sblocca Dashboard"):
             if pw == "elgnaro":
                 st.session_state.password_correct = True
                 st.rerun()
@@ -75,40 +73,39 @@ def check_password():
     return True
 
 # ==========================================
-# 3. DASHBOARD
+# 3. INTERFACCIA PRINCIPALE
 # ==========================================
 if check_password():
-    st.set_page_config(page_title="Fitness Dashboard Pro", layout="wide")
+    st.set_page_config(page_title="Fitness Analytics Pro", layout="wide")
     df = load_data()
 
     if not df.empty:
-        # --- SIDEBAR ---
-        st.sidebar.header("🎯 Filtri")
-        sport = st.sidebar.multiselect("Sport", sorted(df['Tipo di attivita'].unique()), default=df['Tipo di attivita'].unique())
-        date_range = st.sidebar.date_input("Periodo", [df['Data'].min().date(), df['Data'].max().date()])
+        # --- SIDEBAR FILTRI ---
+        st.sidebar.header("🎯 parametri di Filtro")
+        sport = st.sidebar.multiselect("Tipo Attività", sorted(df['Tipo di attivita'].unique()), default=df['Tipo di attivita'].unique())
+        date_range = st.sidebar.date_input("Periodo Analisi", [df['Data'].min().date(), df['Data'].max().date()])
         
         st.sidebar.markdown("---")
-        st.sidebar.subheader("⚙️ Zone Cardio (BPM)")
-        z1 = st.sidebar.number_input("Fine Z1", value=130, key="z1")
-        z2 = st.sidebar.number_input("Fine Z2", value=145, key="z2")
-        z3 = st.sidebar.number_input("Fine Z3", value=160, key="z3")
-        z4 = st.sidebar.number_input("Fine Z4", value=175, key="z4")
+        st.sidebar.subheader("⚙️ Soglie Cardio (BPM)")
+        z1 = st.sidebar.number_input("Fine Z1 (Recupero)", value=130)
+        z2 = st.sidebar.number_input("Fine Z2 (Fondo)", value=145)
+        z3 = st.sidebar.number_input("Fine Z3 (Tempo)", value=160)
+        z4 = st.sidebar.number_input("Fine Z4 (Soglia)", value=175)
         
         zone_labels = ["Z1 (Recupero)", "Z2 (Fondo)", "Z3 (Tempo)", "Z4 (Soglia)", "Z5 (Massimale)"]
-        scelta_zone = st.sidebar.multiselect("Mostra Zone", zone_labels, default=zone_labels)
+        scelta_zone = st.sidebar.multiselect("Filtra per Zona", zone_labels, default=zone_labels)
 
         st.sidebar.markdown("---")
-        st.sidebar.subheader("📊 Performance")
         def q_slider(label, col, key):
             m1, m2 = float(df[col].min()), float(df[col].max())
             if m1 == m2: m2 = m1 + 1.0
             return st.sidebar.slider(label, m1, m2, (m1, m2), key=key)
 
-        f_cal = q_slider("🔥 Calorie", 'Calorie', "cal")
-        f_disl = q_slider("⛰️ Dislivello", 'Ascesa totale', "disl")
-        f_te = q_slider("📈 TE Aerobico", 'TE aerobico', "te")
+        f_cal = q_slider("🔥 Calorie", 'Calorie', "s_cal")
+        f_disl = q_slider("⛰️ Dislivello (m)", 'Ascesa totale', "s_disl")
+        f_te = q_slider("📈 TE Aerobico", 'TE aerobico', "s_te")
 
-        # --- FILTRAGGIO ---
+        # --- ELABORAZIONE ---
         df['Zona Cardio'] = df['FC Media'].apply(lambda x: assegna_zona_custom(x, z1, z2, z3, z4))
         
         mask = (
@@ -122,20 +119,23 @@ if check_password():
         )
         df_f = df.loc[mask].sort_values(by='Data')
 
-        st.title("🏃 Dashboard Analisi Fitness")
+        # --- LAYOUT DASHBOARD ---
+        st.title("🏃 Analisi Performance Atleta")
         
         if not df_f.empty:
-            tabs = st.tabs(["🚀 Trend", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone", "📈 REPORT PROGRESSI", "📋 Dati"])
+            tabs = st.tabs(["🚀 Trend Passo & FC", "📊 Training Effect", "❤️ Cuore", "🔥 Zone", "📈 ALGORITMO PROGRESSI", "📋 Dati"])
             
+            # TAB 0: DOPPIO ASSE PASSO E FC
             with tabs[0]:
-                st.subheader("Relazione tra Passo e Frequenza Cardiaca")
-                df_plot = df_f.dropna(subset=['Passo_Decimale', 'FC Media'])
-                if not df_plot.empty:
+                st.subheader("Efficienza: Relazione Velocità vs Sforzo")
+                df_p = df_f.dropna(subset=['Passo_Decimale', 'FC Media'])
+                if not df_p.empty:
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=df_plot['Data'], y=df_plot['Passo_Decimale'], name="Passo", yaxis="y"))
-                    fig.add_trace(go.Scatter(x=df_plot['Data'], y=df_plot['FC Media'], name="FC Media", yaxis="y2", line=dict(dash='dot')))
-                    fig.update_layout(template="plotly_dark", yaxis=dict(title="Passo", autorange="reversed"), 
-                                      yaxis2=dict(title="FC", side="right", overlaying="y", showgrid=False))
+                    fig.add_trace(go.Scatter(x=df_p['Data'], y=df_p['Passo_Decimale'], name="Passo", mode='lines+markers', line=dict(color='#00CC96'), yaxis="y1"))
+                    fig.add_trace(go.Scatter(x=df_p['Data'], y=df_p['FC Media'], name="FC Media", mode='lines+markers', line=dict(color='#EF553B', dash='dot'), yaxis="y2"))
+                    fig.update_layout(template="plotly_dark", yaxis=dict(title="Passo (min/km)", autorange="reversed"), 
+                                      yaxis2=dict(title="FC (bpm)", side="right", overlaying="y", showgrid=False),
+                                      legend=dict(orientation="h", y=1.1))
                     st.plotly_chart(fig, use_container_width=True)
 
             with tabs[1]:
@@ -151,51 +151,40 @@ if check_password():
                 fig_z.update_yaxes(autorange="reversed")
                 st.plotly_chart(fig_z, use_container_width=True)
 
-            # --- NUOVO TAB: ALGORITMO PROGRESSI ---
+            # TAB 4: ALGORITMO PROGRESSI
             with tabs[4]:
-                st.header("🔍 Analisi Algoritmica dei Progressi")
+                st.header("🔍 Report Intelligente")
                 
-                # Calcolo periodi
-                ultimo_mese = df_f[df_f['Data'] >= (df_f['Data'].max() - timedelta(days=30))]
-                periodo_precedente = df_f[df_f['Data'] < (df_f['Data'].max() - timedelta(days=30))]
                 
-                if not ultimo_mese.empty and not periodo_precedente.empty:
-                    col1, col2 = st.columns(2)
+                # Calcolo Indice Efficienza (Velocità / FC)
+                df_f['Indice_Eff'] = (1 / df_f['Passo_Decimale']) / df_f['FC Media'] * 1000
+                
+                data_taglio = df_f['Data'].max() - timedelta(days=30)
+                recenti = df_f[df_f['Data'] >= data_taglio]
+                storici = df_f[df_f['Data'] < data_taglio]
+                
+                if not recenti.empty and not storici.empty:
+                    eff_r, eff_s = recenti['Indice_Eff'].mean(), storici['Indice_Eff'].mean()
+                    delta = ((eff_r - eff_s) / eff_s) * 100
                     
-                    # 1. Efficienza Aerobica (Passo vs FC)
-                    eff_recente = ultimo_mese['Efficienza'].mean()
-                    eff_storica = periodo_precedente['Efficienza'].mean()
-                    diff_eff = ((eff_storica - eff_recente) / eff_storica) * 100
+                    c1, c2 = st.columns(2)
+                    c1.metric("Indice Efficienza Aerobica", f"{eff_r:.2f}", f"{delta:.1f}%")
+                    c2.metric("Volume Recente (30gg)", f"{int(recenti['Tempo_Minuti'].sum())} min")
                     
-                    with col1:
-                        st.metric("Efficienza Aerobica", f"{eff_recente:.1f}", f"{diff_eff:.1f}% (rispetto al passato)")
-                        st.caption("L'indice di efficienza combina passo e battiti. Più è basso, più sei veloce a parità di sforzo.")
-                    
-                    # 2. Volume di lavoro
-                    vol_recente = ultimo_mese['Tempo_Minuti'].sum() / 4 # media settimanale
-                    vol_storico = periodo_precedente['Tempo_Minuti'].sum() / (len(periodo_precedente['Data'].unique())/7 if len(periodo_precedente)>0 else 1)
-                    with col2:
-                        st.metric("Volume Settimanale Medio", f"{int(vol_recente)} min", f"{vol_recente-vol_storico:.1f} min")
-
                     st.markdown("---")
-                    st.subheader("🤖 Verdetto dell'Algoritmo")
-                    
-                    if diff_eff > 2:
-                        st.success("🎯 **Progresso Eccellente!** Stai diventando più efficiente. Il tuo cuore fatica meno per mantenere velocità elevate.")
-                    elif diff_eff < -2:
-                        st.warning("⚠️ **Stallo o Affaticamento:** La tua efficienza è calata. Potresti aver bisogno di più riposo o di sessioni in Z2 per ricostruire la base.")
+                    if delta > 1.5:
+                        st.success("🚀 **Analisi:** Il tuo cuore è più efficiente! Produci più velocità con meno battiti.")
+                    elif delta < -1.5:
+                        st.warning("⚠️ **Analisi:** Calo di efficienza rilevato. Possibile sovrallenamento o necessità di fondo lento (Z2).")
                     else:
-                        st.info("⚖️ **Mantenimento:** La tua condizione è stabile. Per migliorare prova a variare l'intensità degli stimoli.")
+                        st.info("⚖️ **Analisi:** Performance stabile. Continua con il piano attuale.")
                     
-                    # Grafico Trend Efficienza
-                    st.subheader("Andamento Indice di Efficienza (Lower is Better)")
-                    
-                    fig_eff = px.line(df_f, x='Data', y='Efficienza', trendline="lowess", template="plotly_dark", color_discrete_sequence=['#AB63FA'])
+                    fig_eff = px.scatter(df_f, x='Data', y='Indice_Eff', trendline="ols", template="plotly_dark", title="Trend Efficienza (Salire = Migliorare)")
                     st.plotly_chart(fig_eff, use_container_width=True)
                 else:
-                    st.info("L'algoritmo ha bisogno di almeno 30 giorni di dati storici per confrontare i progressi.")
+                    st.info("Dati insufficienti per il confronto temporale (necessari almeno 30 giorni di storico).")
 
             with tabs[5]:
-                st.dataframe(df_f.drop(columns=['Tempo_TD', 'Passo_Decimale']), use_container_width=True, hide_index=True)
+                st.dataframe(df_f.drop(columns=['Tempo_TD', 'Passo_Decimale', 'Indice_Eff']), use_container_width=True, hide_index=True)
         else:
-            st.warning("Nessun dato trovato.")
+            st.warning("Nessun dato corrispondente ai filtri selezionati.")
