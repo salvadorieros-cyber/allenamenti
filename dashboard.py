@@ -56,38 +56,30 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
     elif fc <= z4: return "Z4 (Soglia)"
     else: return "Z5 (Massimale)"
 
-# ==========================================
-# 1. CONFIGURAZIONE AI (CORRETTA PER PIANO FREE)
-# ==========================================
-import google.generativeai as genai
 
-# Configurazione semplice
-GOOGLE_API_KEY = "AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY"
-genai.configure(api_key=GOOGLE_API_KEY)
+# ==========================================
+# CONFIGURAZIONE AI - NUOVA LIBRERIA 2026
+# ==========================================
+client = genai.Client(api_key="AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY")
 
 def chiedi_a_gemini(sintesi_dati):
     try:
-        # Usiamo il modello 1.5-flash che è quello nativo per il piano Free
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        prompt = f"""
-        Sei un coach sportivo esperto. Analizza questi dati e fornisci un feedback 
-        tecnico, motivante e professionale in italiano:
+        # Prompt per il Coach
+        prompt_coach = f"""
+        Sei un esperto coach sportivo. Analizza questi dati:
         {sintesi_dati}
+        Fornisci un commento tecnico su forma ed efficienza in italiano.
         """
         
-        # Chiamata standard
-        response = model.generate_content(prompt)
+        # Chiamata con la nuova sintassi semplificata
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt_coach
+        )
         
-        # Verifichiamo che la risposta contenga testo
-        if response.text:
-            return response.text
-        else:
-            return "Il coach ha visualizzato i dati ma non ha commentato (risposta vuota)."
-            
+        return response.text
     except Exception as e:
-        # Se fallisce, stampiamo l'errore esatto per capire se è un problema di versione
-        return f"Errore Coach AI: {str(e)}"
+        return f"Errore Coach AI (Nuova Libreria): {e}"
 # ==========================================
 # 2. ACCESSO
 # ==========================================
