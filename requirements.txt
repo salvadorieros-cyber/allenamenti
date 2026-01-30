@@ -2,4 +2,4 @@ streamlit
 pandas
 plotly
 statsmodels
-google-genai==0.3.0
+google-generativeai
