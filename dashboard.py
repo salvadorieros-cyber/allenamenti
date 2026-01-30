@@ -3,9 +3,10 @@ import sqlite3
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from datetime import timedelta
 
 # ==========================================
-# 1. FUNZIONI LOGICHE
+# 1. FUNZIONI LOGICHE & ALGORITMO
 # ==========================================
 @st.cache_data
 def load_data():
@@ -39,6 +40,9 @@ def load_data():
                     return int(parts[0]) + int(parts[1])/60 if len(parts) == 2 else None
                 except: return None
             df['Passo_Decimale'] = df['Passo medio'].apply(passo_a_decimale)
+            
+        # Calcolo Indice Efficienza (Passo * FC) -> Più è basso, meglio è
+        df['Efficienza'] = (df['Passo_Decimale'] * df['FC Media']).round(2)
             
         return df.dropna(subset=['Data'])
     except Exception as e:
@@ -121,36 +125,17 @@ if check_password():
         st.title("🏃 Dashboard Analisi Fitness")
         
         if not df_f.empty:
-            # Metriche
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Attività", len(df_f))
-            c2.metric("Dislivello Tot", f"{int(df_f['Ascesa totale'].sum())} m")
-            c3.metric("Kcal Totali", f"{int(df_f['Calorie'].sum())}")
-            c4.metric("Tempo Tot", f"{df_f['Tempo_Minuti'].sum()/60:.1f} h")
-
-            tabs = st.tabs(["🚀 Trend Passo & FC", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone Cardio", "📋 Dati"])
+            tabs = st.tabs(["🚀 Trend", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone", "📈 REPORT PROGRESSI", "📋 Dati"])
             
             with tabs[0]:
                 st.subheader("Relazione tra Passo e Frequenza Cardiaca")
                 df_plot = df_f.dropna(subset=['Passo_Decimale', 'FC Media'])
-                
                 if not df_plot.empty:
                     fig = go.Figure()
-                    # Linea Passo
-                    fig.add_trace(go.Scatter(x=df_plot['Data'], y=df_plot['Passo_Decimale'], name="Passo",
-                                            mode='lines+markers', line=dict(color='#00CC96', width=2), yaxis="y"))
-                    # Linea FC
-                    fig.add_trace(go.Scatter(x=df_plot['Data'], y=df_plot['FC Media'], name="FC Media",
-                                            mode='lines+markers', line=dict(color='#EF553B', width=2, dash='dot'), yaxis="y2"))
-
-                    fig.update_layout(
-                        template="plotly_dark",
-                        xaxis=dict(title="Data"),
-                        yaxis=dict(title="Passo (min/km)", autorange="reversed", side="left"),
-                        yaxis2=dict(title="FC Media (bpm)", side="right", overlaying="y", showgrid=False),
-                        legend=dict(orientation="h", y=1.1),
-                        margin=dict(l=20, r=20, t=50, b=20)
-                    )
+                    fig.add_trace(go.Scatter(x=df_plot['Data'], y=df_plot['Passo_Decimale'], name="Passo", yaxis="y"))
+                    fig.add_trace(go.Scatter(x=df_plot['Data'], y=df_plot['FC Media'], name="FC Media", yaxis="y2", line=dict(dash='dot')))
+                    fig.update_layout(template="plotly_dark", yaxis=dict(title="Passo", autorange="reversed"), 
+                                      yaxis2=dict(title="FC", side="right", overlaying="y", showgrid=False))
                     st.plotly_chart(fig, use_container_width=True)
 
             with tabs[1]:
@@ -162,12 +147,55 @@ if check_password():
                 st.plotly_chart(fig_fc, use_container_width=True)
 
             with tabs[3]:
-                fig_z = px.box(df_f, x='Zona Cardio', y='Passo_Decimale', color='Zona Cardio', 
-                              category_orders={"Zona Cardio": zone_labels}, template="plotly_dark")
+                fig_z = px.box(df_f, x='Zona Cardio', y='Passo_Decimale', color='Zona Cardio', category_orders={"Zona Cardio": zone_labels}, template="plotly_dark")
                 fig_z.update_yaxes(autorange="reversed")
                 st.plotly_chart(fig_z, use_container_width=True)
 
+            # --- NUOVO TAB: ALGORITMO PROGRESSI ---
             with tabs[4]:
+                st.header("🔍 Analisi Algoritmica dei Progressi")
+                
+                # Calcolo periodi
+                ultimo_mese = df_f[df_f['Data'] >= (df_f['Data'].max() - timedelta(days=30))]
+                periodo_precedente = df_f[df_f['Data'] < (df_f['Data'].max() - timedelta(days=30))]
+                
+                if not ultimo_mese.empty and not periodo_precedente.empty:
+                    col1, col2 = st.columns(2)
+                    
+                    # 1. Efficienza Aerobica (Passo vs FC)
+                    eff_recente = ultimo_mese['Efficienza'].mean()
+                    eff_storica = periodo_precedente['Efficienza'].mean()
+                    diff_eff = ((eff_storica - eff_recente) / eff_storica) * 100
+                    
+                    with col1:
+                        st.metric("Efficienza Aerobica", f"{eff_recente:.1f}", f"{diff_eff:.1f}% (rispetto al passato)")
+                        st.caption("L'indice di efficienza combina passo e battiti. Più è basso, più sei veloce a parità di sforzo.")
+                    
+                    # 2. Volume di lavoro
+                    vol_recente = ultimo_mese['Tempo_Minuti'].sum() / 4 # media settimanale
+                    vol_storico = periodo_precedente['Tempo_Minuti'].sum() / (len(periodo_precedente['Data'].unique())/7 if len(periodo_precedente)>0 else 1)
+                    with col2:
+                        st.metric("Volume Settimanale Medio", f"{int(vol_recente)} min", f"{vol_recente-vol_storico:.1f} min")
+
+                    st.markdown("---")
+                    st.subheader("🤖 Verdetto dell'Algoritmo")
+                    
+                    if diff_eff > 2:
+                        st.success("🎯 **Progresso Eccellente!** Stai diventando più efficiente. Il tuo cuore fatica meno per mantenere velocità elevate.")
+                    elif diff_eff < -2:
+                        st.warning("⚠️ **Stallo o Affaticamento:** La tua efficienza è calata. Potresti aver bisogno di più riposo o di sessioni in Z2 per ricostruire la base.")
+                    else:
+                        st.info("⚖️ **Mantenimento:** La tua condizione è stabile. Per migliorare prova a variare l'intensità degli stimoli.")
+                    
+                    # Grafico Trend Efficienza
+                    st.subheader("Andamento Indice di Efficienza (Lower is Better)")
+                    
+                    fig_eff = px.line(df_f, x='Data', y='Efficienza', trendline="lowess", template="plotly_dark", color_discrete_sequence=['#AB63FA'])
+                    st.plotly_chart(fig_eff, use_container_width=True)
+                else:
+                    st.info("L'algoritmo ha bisogno di almeno 30 giorni di dati storici per confrontare i progressi.")
+
+            with tabs[5]:
                 st.dataframe(df_f.drop(columns=['Tempo_TD', 'Passo_Decimale']), use_container_width=True, hide_index=True)
         else:
             st.warning("Nessun dato trovato.")
