@@ -59,32 +59,35 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
 # ==========================================
 # 1. CONFIGURAZIONE AI (CORRETTA PER PIANO FREE)
 # ==========================================
-GOOGLE_API_KEY = "AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY"
+import google.generativeai as genai
 
-# Forza la configurazione sulla versione v1 (stabile)
+# Configurazione semplice
+GOOGLE_API_KEY = "AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY"
 genai.configure(api_key=GOOGLE_API_KEY)
 
 def chiedi_a_gemini(sintesi_dati):
-    # Prova una lista di nomi modelli dal più recente al più compatibile
-    modelli_da_provare = ['gemini-1.5-flash', 'gemini-1.0-pro', 'gemini-pro']
-    
-    prompt = f"""
-    Sei un esperto coach sportivo. Analizza questi dati:
-    {sintesi_dati}
-    Fornisci un commento tecnico su forma, efficienza e consigli in italiano.
-    """
-    
-    ultimo_errore = ""
-    for nome_modello in modelli_da_provare:
-        try:
-            model = genai.GenerativeModel(nome_modello)
-            response = model.generate_content(prompt)
+    try:
+        # Usiamo il modello 1.5-flash che è quello nativo per il piano Free
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = f"""
+        Sei un coach sportivo esperto. Analizza questi dati e fornisci un feedback 
+        tecnico, motivante e professionale in italiano:
+        {sintesi_dati}
+        """
+        
+        # Chiamata standard
+        response = model.generate_content(prompt)
+        
+        # Verifichiamo che la risposta contenga testo
+        if response.text:
             return response.text
-        except Exception as e:
-            ultimo_errore = str(e)
-            continue # Prova il modello successivo nella lista
+        else:
+            return "Il coach ha visualizzato i dati ma non ha commentato (risposta vuota)."
             
-    return f"Nessun modello disponibile. Errore finale: {ultimo_errore}"
+    except Exception as e:
+        # Se fallisce, stampiamo l'errore esatto per capire se è un problema di versione
+        return f"Errore Coach AI: {str(e)}"
 # ==========================================
 # 2. ACCESSO
 # ==========================================
