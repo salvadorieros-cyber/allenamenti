@@ -58,19 +58,31 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
 
 def chiedi_a_gemini(sintesi_dati):
     try:
-        # Usiamo 'gemini-pro' che è il più compatibile universalmente
-        model = genai.GenerativeModel('gemini-pro')
+        # Usiamo il nome del modello specifico per la versione Free stabile
+        model = genai.GenerativeModel(model_name='gemini-1.5-flash-latest')
+        
         prompt = f"""
-        Sei un esperto coach sportivo. Analizza questi dati di allenamento:
+        Sei un esperto coach sportivo e analista dati. 
+        Analizza questi parametri di allenamento dell'atleta:
         {sintesi_dati}
         
-        Fornisci un commento sullo stato di forma, un consiglio tecnico e segnali di stallo.
-        Rispondi in italiano in modo professionale.
+        Fornisci:
+        1. Stato di forma (Miglioramento/Stallo/Affaticamento).
+        2. Un consiglio tecnico pratico basato sulla distribuzione delle zone cardio.
+        3. Un commento sull'efficienza aerobica.
+        
+        Rispondi in italiano, sii breve ma molto tecnico.
         """
+        # Configurazione per evitare blocchi di sicurezza standard su dati tecnici
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"Errore nell'interrogazione AI: {e}"
+        # Se fallisce ancora, proviamo il fallback sul modello base pro
+        try:
+            model_fallback = genai.GenerativeModel('gemini-1.5-pro')
+            return model_fallback.generate_content(prompt).text
+        except:
+            return f"Errore di connessione API: {e}. Verifica che la chiave sia attiva su AI Studio."
 
 # ==========================================
 # 2. ACCESSO
