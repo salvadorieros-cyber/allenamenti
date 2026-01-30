@@ -4,7 +4,13 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
-from google import genai  # <--- NUOVO IMPORT RICHIESTO DAI LOG
+
+# Proviamo l'import con gestione dell'errore per darti feedback immediato
+try:
+    from google import genai
+    AI_AVAILABLE = True
+except ImportError:
+    AI_AVAILABLE = False
 
 # ==========================================
 # 1. CONFIGURAZIONE & LOGICA DATI
@@ -57,32 +63,25 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
     else: return "Z5 (Massimale)"
 
 # ==========================================
-# CONFIGURAZIONE AI - NUOVO STANDARD 2026
+# CONFIGURAZIONE AI
 # ==========================================
-# Inizializziamo il client fuori dalla funzione per efficienza
-client = genai.Client(api_key="AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY")
+if AI_AVAILABLE:
+    # Inserisci qui la tua chiave
+    client = genai.Client(api_key="AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY")
+else:
+    st.error("Errore: La libreria 'google-genai' non è stata installata correttamente. Controlla i Requirements.")
 
 def chiedi_a_gemini(sintesi_dati):
+    if not AI_AVAILABLE:
+        return "Servizio AI non configurato correttamente."
     try:
-        prompt_coach = f"""
-        Sei un esperto coach sportivo. Analizza questi dati di allenamento:
-        {sintesi_dati}
-        
-        Fornisci in italiano:
-        1. Analisi dello stato di forma.
-        2. Un consiglio tecnico per migliorare l'efficienza aerobica.
-        3. Valutazione del carico di lavoro (overtraining o stallo).
-        """
-        
-        # Nuova sintassi del client ufficiale
         response = client.models.generate_content(
             model="gemini-1.5-flash",
-            contents=prompt_coach
+            contents=f"Sei un coach sportivo. Analizza: {sintesi_dati}. Rispondi in italiano."
         )
-        
         return response.text
     except Exception as e:
-        return f"Il Coach AI ha avuto un problema tecnico: {e}"
+        return f"Errore durante l'analisi: {e}"
 # ==========================================
 # 2. ACCESSO
 # ==========================================
