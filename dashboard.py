@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
-import google.generativeai as genai
+from google import genai  # <--- NUOVO IMPORT RICHIESTO DAI LOG
 
 # ==========================================
 # 1. CONFIGURAZIONE & LOGICA DATI
@@ -56,30 +56,33 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
     elif fc <= z4: return "Z4 (Soglia)"
     else: return "Z5 (Massimale)"
 
-import streamlit as st
-import google.generativeai as genai # Torniamo a questo import ma con la logica aggiornata
-
 # ==========================================
-# CONFIGURAZIONE AI - VERSIONE COMPATIBILE
+# CONFIGURAZIONE AI - NUOVO STANDARD 2026
 # ==========================================
-genai.configure(api_key="AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY")
+# Inizializziamo il client fuori dalla funzione per efficienza
+client = genai.Client(api_key="AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY")
 
 def chiedi_a_gemini(sintesi_dati):
     try:
-        # Inizializziamo il modello direttamente
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        prompt = f"""
-        Sei un esperto coach sportivo. Analizza questi dati e fornisci un feedback 
-        tecnico, motivante e professionale in italiano:
+        prompt_coach = f"""
+        Sei un esperto coach sportivo. Analizza questi dati di allenamento:
         {sintesi_dati}
+        
+        Fornisci in italiano:
+        1. Analisi dello stato di forma.
+        2. Un consiglio tecnico per migliorare l'efficienza aerobica.
+        3. Valutazione del carico di lavoro (overtraining o stallo).
         """
         
-        # Chiamata semplice
-        response = model.generate_content(prompt)
+        # Nuova sintassi del client ufficiale
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt_coach
+        )
+        
         return response.text
     except Exception as e:
-        return f"Errore Coach AI: {str(e)}"
+        return f"Il Coach AI ha avuto un problema tecnico: {e}"
 # ==========================================
 # 2. ACCESSO
 # ==========================================
