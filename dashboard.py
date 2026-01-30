@@ -86,36 +86,26 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
 
 def chiedi_a_gemini(sintesi_dati: str) -> str:
     try:
-        # Recupero API key da secrets
-        api_key = st.secrets.get("GEMINI_API_KEY", "")
-        if not api_key:
-            return "Il Coach AI non è configurato: manca GEMINI_API_KEY nei secrets."
-
+        api_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=api_key)
 
         prompt = f"""
-        Sei un coach sportivo esperto. Analizza questi dati di un atleta:
+        Sei un coach sportivo esperto. Analizza questi dati:
         {sintesi_dati}
-        
-        Fornisci in italiano un'analisi tecnica su:
+
+        Fornisci:
         1. Stato di forma e trend di efficienza.
         2. Bilanciamento delle zone cardio.
         3. Consigli pratici per i prossimi allenamenti.
-        Sii sintetico ma professionale.
         """
 
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-pro")
         response = model.generate_content(prompt)
 
-        # Alcune versioni restituiscono .text, altre .candidates
-        if hasattr(response, "text") and response.text:
-            return response.text
-        elif hasattr(response, "candidates") and response.candidates:
-            return response.candidates[0].content.parts[0].text
-        else:
-            return "Il Coach AI non ha restituito un testo interpretabile."
+        return response.text
+
     except Exception as e:
-        return f"Il Coach AI è momentaneamente offline: {e}"
+        return f"Errore AI: {e}"
 
 
 # ==========================================
