@@ -53,7 +53,7 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
     else: return "Z5 (Massimale)"
 
 # ==========================================
-# 2. INTERFACCIA E SICUREZZA
+# 2. SICUREZZA
 # ==========================================
 def check_password():
     if "password_correct" not in st.session_state:
@@ -71,7 +71,7 @@ def check_password():
     return True
 
 # ==========================================
-# 3. DASHBOARD PRINCIPALE
+# 3. DASHBOARD
 # ==========================================
 if check_password():
     st.set_page_config(page_title="Fitness Dashboard Pro", layout="wide")
@@ -79,16 +79,16 @@ if check_password():
 
     if not df.empty:
         # --- SIDEBAR ---
-        st.sidebar.header("🎯 Filtri Attività")
+        st.sidebar.header("🎯 Filtri")
         sport = st.sidebar.multiselect("Sport", sorted(df['Tipo di attivita'].unique()), default=df['Tipo di attivita'].unique())
         date_range = st.sidebar.date_input("Periodo", [df['Data'].min().date(), df['Data'].max().date()])
         
         st.sidebar.markdown("---")
-        st.sidebar.subheader("⚙️ Zone Cardio (Analisi BPM)")
-        z1 = st.sidebar.number_input("Fine Z1 (Recupero)", value=130, key="z1")
-        z2 = st.sidebar.number_input("Fine Z2 (Fondo)", value=145, key="z2")
-        z3 = st.sidebar.number_input("Fine Z3 (Tempo)", value=160, key="z3")
-        z4 = st.sidebar.number_input("Fine Z4 (Soglia)", value=175, key="z4")
+        st.sidebar.subheader("⚙️ Zone Cardio (BPM)")
+        z1 = st.sidebar.number_input("Fine Z1", value=130, key="z1")
+        z2 = st.sidebar.number_input("Fine Z2", value=145, key="z2")
+        z3 = st.sidebar.number_input("Fine Z3", value=160, key="z3")
+        z4 = st.sidebar.number_input("Fine Z4", value=175, key="z4")
         
         zone_labels = ["Z1 (Recupero)", "Z2 (Fondo)", "Z3 (Tempo)", "Z4 (Soglia)", "Z5 (Massimale)"]
         scelta_zone = st.sidebar.multiselect("Mostra Zone", zone_labels, default=zone_labels)
@@ -101,10 +101,10 @@ if check_password():
             return st.sidebar.slider(label, m1, m2, (m1, m2), key=key)
 
         f_cal = q_slider("🔥 Calorie", 'Calorie', "cal")
-        f_disl = q_slider("⛰️ Dislivello (m)", 'Ascesa totale', "disl")
+        f_disl = q_slider("⛰️ Dislivello", 'Ascesa totale', "disl")
         f_te = q_slider("📈 TE Aerobico", 'TE aerobico', "te")
 
-        # --- LOGICA DI FILTRAGGIO ---
+        # --- FILTRAGGIO ---
         df['Zona Cardio'] = df['FC Media'].apply(lambda x: assegna_zona_custom(x, z1, z2, z3, z4))
         
         mask = (
@@ -118,10 +118,10 @@ if check_password():
         )
         df_f = df.loc[mask].sort_values(by='Data')
 
-        # --- VISUALIZZAZIONE ---
         st.title("🏃 Dashboard Analisi Fitness")
         
         if not df_f.empty:
+            # Metriche
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Attività", len(df_f))
             c2.metric("Dislivello Tot", f"{int(df_f['Ascesa totale'].sum())} m")
@@ -131,62 +131,28 @@ if check_password():
             tabs = st.tabs(["🚀 Trend Passo & FC", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone Cardio", "📋 Dati"])
             
             with tabs[0]:
-                st.subheader("Relazione tra Passo e Frequenza Cardiaca Media")
+                st.subheader("Relazione tra Passo e Frequenza Cardiaca")
+                df_plot = df_f.dropna(subset=['Passo_Decimale', 'FC Media'])
                 
-                # Creiamo una copia per il grafico ed eliminiamo righe con dati mancanti per queste due colonne
-                df_plot = df_f.dropna(subset=['Passo_Decimale', 'FC Media']).sort_values('Data')
-
                 if not df_plot.empty:
                     fig = go.Figure()
+                    # Linea Passo
+                    fig.add_trace(go.Scatter(x=df_plot['Data'], y=df_plot['Passo_Decimale'], name="Passo",
+                                            mode='lines+markers', line=dict(color='#00CC96', width=2), yaxis="y"))
+                    # Linea FC
+                    fig.add_trace(go.Scatter(x=df_plot['Data'], y=df_plot['FC Media'], name="FC Media",
+                                            mode='lines+markers', line=dict(color='#EF553B', width=2, dash='dot'), yaxis="y2"))
 
-                    # Aggiunta linea Passo (Asse Y1)
-                    fig.add_trace(go.Scatter(
-                        x=df_plot['Data'], 
-                        y=df_plot['Passo_Decimale'],
-                        name="Passo (min/km)",
-                        mode='lines+markers',
-                        line=dict(color='#00CC96', width=3),
-                        yaxis="y1",
-                        hovertemplate="Data: %{x}<br>Passo: %{y:.2f} min/km<extra></extra>"
-                    ))
-
-                    # Aggiunta linea FC Media (Asse Y2)
-                    fig.add_trace(go.Scatter(
-                        x=df_plot['Data'], 
-                        y=df_plot['FC Media'],
-                        name="FC Media (bpm)",
-                        mode='lines+markers',
-                        line=dict(color='#EF553B', width=3, dash='dot'),
-                        yaxis="y2",
-                        hovertemplate="Data: %{x}<br>FC: %{y} bpm<extra></extra>"
-                    ))
-
-                    # Layout con gestione sicura degli assi
                     fig.update_layout(
                         template="plotly_dark",
-                        hovermode="x unified",
-                        xaxis=dict(title="Data", type='date'),
-                        yaxis=dict(
-                            title="Passo (min/km)",
-                            titlefont=dict(color="#00CC96"),
-                            tickfont=dict(color="#00CC96"),
-                            autorange="reversed"  # Mette i passi più veloci (numeri bassi) in alto
-                        ),
-                        yaxis2=dict(
-                            title="FC Media (bpm)",
-                            titlefont=dict(color="#EF553B"),
-                            tickfont=dict(color="#EF553B"),
-                            anchor="x",
-                            overlaying="y",
-                            side="right",
-                            showgrid=False # Evita confusione con le griglie dell'asse Y1
-                        ),
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        xaxis=dict(title="Data"),
+                        yaxis=dict(title="Passo (min/km)", autorange="reversed", side="left"),
+                        yaxis2=dict(title="FC Media (bpm)", side="right", overlaying="y", showgrid=False),
+                        legend=dict(orientation="h", y=1.1),
+                        margin=dict(l=20, r=20, t=50, b=20)
                     )
                     st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("Dati insufficienti (Passo o FC mancanti) per generare questo grafico.")
-                
+
             with tabs[1]:
                 fig_te = px.scatter(df_f, x='Tempo_Minuti', y='TE aerobico', color='Tipo di attivita', size='Calorie', trendline="ols", template="plotly_dark")
                 st.plotly_chart(fig_te, use_container_width=True)
@@ -196,15 +162,12 @@ if check_password():
                 st.plotly_chart(fig_fc, use_container_width=True)
 
             with tabs[3]:
-                st.subheader("Distribuzione Passo per Zona Cardio")
                 fig_z = px.box(df_f, x='Zona Cardio', y='Passo_Decimale', color='Zona Cardio', 
-                              category_orders={"Zona Cardio": zone_labels},
-                              template="plotly_dark")
+                              category_orders={"Zona Cardio": zone_labels}, template="plotly_dark")
                 fig_z.update_yaxes(autorange="reversed")
                 st.plotly_chart(fig_z, use_container_width=True)
 
             with tabs[4]:
-                cols_view = ['Data', 'Tipo di attivita', 'Zona Cardio', 'Titolo', 'Tempo', 'Distanza', 'Ascesa totale', 'Calorie', 'FC Media', 'TE aerobico', 'Passo medio']
-                st.dataframe(df_f[cols_view], use_container_width=True, hide_index=True)
+                st.dataframe(df_f.drop(columns=['Tempo_TD', 'Passo_Decimale']), use_container_width=True, hide_index=True)
         else:
-            st.warning("Nessun dato trovato con i filtri attuali.")
+            st.warning("Nessun dato trovato.")
