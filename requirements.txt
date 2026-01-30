@@ -4,3 +4,5 @@ plotly==5.18.0
 google-generativeai==0.5.4
 numpy==1.26.4
 statsmodels==0.14.1
+scipy==1.15.3
+patsy==1.0.2
