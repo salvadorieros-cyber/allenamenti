@@ -42,6 +42,7 @@ def load_data():
 
         for col in cols_num:
             if col in df.columns:
+               df[col] = df[col].replace('--', None)  # sostituisci '--' con None/NaN
                 df[col] = (
                     df[col].astype(str)
                     .str.replace(".", "", regex=False)
