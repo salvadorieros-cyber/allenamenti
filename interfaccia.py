@@ -23,22 +23,28 @@ def render_sidebar(df):
     date_range = st.sidebar.date_input("Periodo", [df['Data'].min().date(), df['Data'].max().date()])
     
     st.sidebar.markdown("---")
-    st.sidebar.subheader("⚙️ Zone Cardio")
-    metodo = st.sidebar.radio("Calcolo FC Max", ["Manuale", "Età"])
-    fc_max = 185
-    if metodo == "Età":
-        eta = st.sidebar.number_input("Età", 5, 100, 35)
-        fc_max = 220 - eta
-    else:
-        fc_max = st.sidebar.number_input("FC Max reale", value=185)
+    st.sidebar.subheader("⚙️ Configurazione Zone (BPM)")
+    st.sidebar.caption("Inserisci i limiti superiori per ogni zona")
     
-    zone_list = ["Z1 (Recupero)", "Z2 (Fondo)", "Z3 (Tempo)", "Z4 (Soglia)", "Z5 (Massimale)"]
-    scelta_zone = st.sidebar.multiselect("Filtra Zone", zone_list, default=zone_list)
+    # Campi per inserire i valori delle tue analisi
+    limite_z1 = st.sidebar.number_input("Fine Z1 (Recupero)", value=130)
+    limite_z2 = st.sidebar.number_input("Fine Z2 (Fondo)", value=145)
+    limite_z3 = st.sidebar.number_input("Fine Z3 (Tempo)", value=160)
+    limite_z4 = st.sidebar.number_input("Fine Z4 (Soglia)", value=175)
+    
+    zone_custom = {
+        "Z1": limite_z1,
+        "Z2": limite_z2,
+        "Z3": limite_z3,
+        "Z4": limite_z4
+    }
+
+    zone_labels = ["Z1 (Recupero)", "Z2 (Fondo)", "Z3 (Tempo)", "Z4 (Soglia)", "Z5 (Massimale)"]
+    scelta_zone = st.sidebar.multiselect("Filtra Zone", zone_labels, default=zone_labels)
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 Filtri Performance")
     
-    # Funzione interna per creare slider sicuri
     def q_slider(label, col):
         m1, m2 = float(df[col].min()), float(df[col].max())
         if m1 == m2: m2 = m1 + 1.0
@@ -51,8 +57,8 @@ def render_sidebar(df):
     return {
         "sport": sport,
         "date_range": date_range,
-        "fc_max": fc_max,
-        "zone": scelta_zone,
+        "zone_custom": zone_custom,
+        "zone_scelte": scelta_zone,
         "cal": f_cal,
         "disl": f_disl,
         "te": f_te

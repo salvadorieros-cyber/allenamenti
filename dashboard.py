@@ -3,15 +3,30 @@ import plotly.express as px
 from funzioni_dati import load_data, assegna_zona
 from interfaccia import check_password, render_sidebar
 
+
+
 if check_password():
     st.set_page_config(page_title="Fitness Dashboard Pro", layout="wide")
     df = load_data()
 
     if not df.empty:
-        # 1. Caricamento Filtri dalla Sidebar
         f = render_sidebar(df)
         
-        # 2. Elaborazione Zone Cardio
+        # ELABORAZIONE ZONE CON I TUOI VALORI
+        df['Zona Cardio'] = df['FC Media'].apply(lambda x: assegna_zona_custom(x, f["zone_custom"]))
+        
+        # APPLICAZIONE FILTRI
+        mask = (
+            (df['Tipo di attivita'].isin(f["sport"])) &
+            (df['Zona Cardio'].isin(f["zone_scelte"])) &
+            (df['Data'].dt.date >= f["date_range"][0]) &
+            (df['Data'].dt.date <= (f["date_range"][1] if len(f["date_range"])>1 else f["date_range"][0])) &
+            (df['Calorie'].between(f["cal"][0], f["cal"][1])) &
+            (df['Ascesa totale'].between(f["disl"][0], f["disl"][1])) &
+            (df['TE aerobico'].between(f["te"][0], f["te"][1]))
+        )
+        
+        # ... tutto il resto del codice rimane uguale ...
         df['Zona Cardio'] = df['FC Media'].apply(lambda x: assegna_zona(x, f["fc_max"]))
         
         # 3. Applicazione Filtri (Maschera)

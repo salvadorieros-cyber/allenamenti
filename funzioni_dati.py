@@ -44,10 +44,9 @@ def load_data():
         st.error(f"Errore caricamento dati: {e}")
         return pd.DataFrame()
 
-def assegna_zona(fc, fc_max_ref):
-    perc = (fc / fc_max_ref) * 100
-    if perc < 60: return "Z1 (Recupero)"
-    elif 60 <= perc < 70: return "Z2 (Fondo)"
-    elif 70 <= perc < 80: return "Z3 (Tempo)"
-    elif 80 <= perc < 90: return "Z4 (Soglia)"
+def assegna_zona_custom(fc, zone_dict):
+    if fc <= zone_dict["Z1"]: return "Z1 (Recupero)"
+    elif fc <= zone_dict["Z2"]: return "Z2 (Fondo)"
+    elif fc <= zone_dict["Z3"]: return "Z3 (Tempo)"
+    elif fc <= zone_dict["Z4"]: return "Z4 (Soglia)"
     else: return "Z5 (Massimale)"
