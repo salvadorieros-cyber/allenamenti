@@ -4,9 +4,14 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
+import google.generativeai as genai
+
+# Configurazione API Gemini
+GOOGLE_API_KEY = "AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY"
+genai.configure(api_key=GOOGLE_API_KEY)
 
 # ==========================================
-# 1. LOGICA DATI & ALGORITMO
+# 1. LOGICA DATI
 # ==========================================
 @st.cache_data
 def load_data():
@@ -16,12 +21,10 @@ def load_data():
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = cursor.fetchall()
         table_name = tables[0][0]
-        df = pd.read_sql_query(f"SELECT * FROM '{table_name}'", conn)
+        df = pd.to_sql_query = pd.read_sql_query(f"SELECT * FROM '{table_name}'", conn)
         conn.close()
         
         df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
-        
-        # Pulizia numerica
         cols_num = ['Calorie', 'FC Media', 'FC max', 'TE aerobico', 'Cadenza media', 'Distanza', 'Ascesa totale']
         for col in cols_num:
             if col in df.columns:
@@ -55,136 +58,115 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
     else: return "Z5 (Massimale)"
 
 # ==========================================
-# 2. SICUREZZA
+# 2. FUNZIONE ANALISI AI
 # ==========================================
-def check_password():
-    if "password_correct" not in st.session_state:
-        st.session_state.password_correct = False
-    if not st.session_state.password_correct:
-        st.title("🔐 Accesso Riservato")
-        pw = st.text_input("Inserisci la chiave di accesso", type="password")
-        if st.button("Sblocca Dashboard"):
-            if pw == "elgnaro":
-                st.session_state.password_correct = True
-                st.rerun()
-            else:
-                st.error("Password errata")
-        return False
-    return True
+def chiedi_a_gemini(sintesi_dati):
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"""
+        Sei un esperto coach sportivo. Analizza i seguenti dati di allenamento di un atleta e fornisci:
+        1. Un commento sullo stato di forma attuale.
+        2. Un consiglio tecnico specifico per migliorare l'efficienza.
+        3. Eventuali segnali di allarme (overtraining o stallo).
+        
+        Dati dell'atleta (ultimi 30 giorni vs storico):
+        {sintesi_dati}
+        
+        Sii conciso, professionale e motivante. Rispondi in italiano.
+        """
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"L'AI sta riposando... (Errore: {e})"
 
 # ==========================================
-# 3. INTERFACCIA PRINCIPALE
+# 3. DASHBOARD
 # ==========================================
-if check_password():
-    st.set_page_config(page_title="Fitness Analytics Pro", layout="wide")
+if "password_correct" not in st.session_state:
+    st.session_state.password_correct = False
+
+if not st.session_state.password_correct:
+    st.title("🔐 Accesso Riservato")
+    pw = st.text_input("Password", type="password")
+    if st.button("Sblocca"):
+        if pw == "elgnaro":
+            st.session_state.password_correct = True
+            st.rerun()
+else:
+    st.set_page_config(page_title="Fitness AI Dashboard", layout="wide")
     df = load_data()
 
     if not df.empty:
-        # --- SIDEBAR FILTRI ---
-        st.sidebar.header("🎯 parametri di Filtro")
-        sport = st.sidebar.multiselect("Tipo Attività", sorted(df['Tipo di attivita'].unique()), default=df['Tipo di attivita'].unique())
-        date_range = st.sidebar.date_input("Periodo Analisi", [df['Data'].min().date(), df['Data'].max().date()])
+        # SIDEBAR
+        st.sidebar.header("🎯 Filtri")
+        sport = st.sidebar.multiselect("Sport", sorted(df['Tipo di attivita'].unique()), default=df['Tipo di attivita'].unique())
+        date_range = st.sidebar.date_input("Periodo", [df['Data'].min().date(), df['Data'].max().date()])
         
         st.sidebar.markdown("---")
-        st.sidebar.subheader("⚙️ Soglie Cardio (BPM)")
-        z1 = st.sidebar.number_input("Fine Z1 (Recupero)", value=130)
-        z2 = st.sidebar.number_input("Fine Z2 (Fondo)", value=145)
-        z3 = st.sidebar.number_input("Fine Z3 (Tempo)", value=160)
-        z4 = st.sidebar.number_input("Fine Z4 (Soglia)", value=175)
+        st.sidebar.subheader("⚙️ Zone BPM")
+        z1 = st.sidebar.number_input("Fine Z1", value=130)
+        z2 = st.sidebar.number_input("Fine Z2", value=145)
+        z3 = st.sidebar.number_input("Fine Z3", value=160)
+        z4 = st.sidebar.number_input("Fine Z4", value=175)
         
-        zone_labels = ["Z1 (Recupero)", "Z2 (Fondo)", "Z3 (Tempo)", "Z4 (Soglia)", "Z5 (Massimale)"]
-        scelta_zone = st.sidebar.multiselect("Filtra per Zona", zone_labels, default=zone_labels)
-
-        st.sidebar.markdown("---")
-        def q_slider(label, col, key):
-            m1, m2 = float(df[col].min()), float(df[col].max())
-            if m1 == m2: m2 = m1 + 1.0
-            return st.sidebar.slider(label, m1, m2, (m1, m2), key=key)
-
-        f_cal = q_slider("🔥 Calorie", 'Calorie', "s_cal")
-        f_disl = q_slider("⛰️ Dislivello (m)", 'Ascesa totale', "s_disl")
-        f_te = q_slider("📈 TE Aerobico", 'TE aerobico', "s_te")
-
-        # --- ELABORAZIONE ---
+        # ELABORAZIONE
         df['Zona Cardio'] = df['FC Media'].apply(lambda x: assegna_zona_custom(x, z1, z2, z3, z4))
-        
-        mask = (
-            (df['Tipo di attivita'].isin(sport)) &
-            (df['Zona Cardio'].isin(scelta_zone)) &
-            (df['Data'].dt.date >= date_range[0]) &
-            (df['Data'].dt.date <= (date_range[1] if len(date_range)>1 else date_range[0])) &
-            (df['Calorie'].between(f_cal[0], f_cal[1])) &
-            (df['Ascesa totale'].between(f_disl[0], f_disl[1])) &
-            (df['TE aerobico'].between(f_te[0], f_te[1]))
-        )
+        mask = (df['Tipo di attivita'].isin(sport)) & (df['Data'].dt.date >= date_range[0]) & (df['Data'].dt.date <= (date_range[1] if len(date_range)>1 else date_range[0]))
         df_f = df.loc[mask].sort_values(by='Data')
 
-        # --- LAYOUT DASHBOARD ---
-        st.title("🏃 Analisi Performance Atleta")
+        st.title("🏃 Analisi Performance con AI")
         
-        if not df_f.empty:
-            tabs = st.tabs(["🚀 Trend Passo & FC", "📊 Training Effect", "❤️ Cuore", "🔥 Zone", "📈 ALGORITMO PROGRESSI", "📋 Dati"])
+        tabs = st.tabs(["🚀 Trend", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone", "🤖 COACH AI PROGRESSI", "📋 Dati"])
+        
+        with tabs[0]:
+            df_p = df_f.dropna(subset=['Passo_Decimale', 'FC Media'])
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df_p['Data'], y=df_p['Passo_Decimale'], name="Passo", yaxis="y1", line=dict(color='#00CC96')))
+            fig.add_trace(go.Scatter(x=df_p['Data'], y=df_p['FC Media'], name="FC Media", yaxis="y2", line=dict(color='#EF553B', dash='dot')))
+            fig.update_layout(template="plotly_dark", yaxis=dict(title="Passo", autorange="reversed"), yaxis2=dict(title="FC", side="right", overlaying="y", showgrid=False))
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tabs[3]:
+            fig_z = px.box(df_f, x='Zona Cardio', y='Passo_Decimale', color='Zona Cardio', template="plotly_dark")
+            fig_z.update_yaxes(autorange="reversed")
+            st.plotly_chart(fig_z, use_container_width=True)
+
+        # --- TAB 4: IL CUORE DELL'INTEGRAZIONE AI ---
+        with tabs[4]:
+            st.header("🤖 Analisi Intelligente Gemini AI")
             
-            # TAB 0: DOPPIO ASSE PASSO E FC
-            with tabs[0]:
-                st.subheader("Efficienza: Relazione Velocità vs Sforzo")
-                df_p = df_f.dropna(subset=['Passo_Decimale', 'FC Media'])
-                if not df_p.empty:
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=df_p['Data'], y=df_p['Passo_Decimale'], name="Passo", mode='lines+markers', line=dict(color='#00CC96'), yaxis="y1"))
-                    fig.add_trace(go.Scatter(x=df_p['Data'], y=df_p['FC Media'], name="FC Media", mode='lines+markers', line=dict(color='#EF553B', dash='dot'), yaxis="y2"))
-                    fig.update_layout(template="plotly_dark", yaxis=dict(title="Passo (min/km)", autorange="reversed"), 
-                                      yaxis2=dict(title="FC (bpm)", side="right", overlaying="y", showgrid=False),
-                                      legend=dict(orientation="h", y=1.1))
-                    st.plotly_chart(fig, use_container_width=True)
-
-            with tabs[1]:
-                fig_te = px.scatter(df_f, x='Tempo_Minuti', y='TE aerobico', color='Tipo di attivita', size='Calorie', trendline="ols", template="plotly_dark")
-                st.plotly_chart(fig_te, use_container_width=True)
-
-            with tabs[2]:
-                fig_fc = px.line(df_f, x='Data', y=['FC Media', 'FC max'], markers=True, template="plotly_dark")
-                st.plotly_chart(fig_fc, use_container_width=True)
-
-            with tabs[3]:
-                fig_z = px.box(df_f, x='Zona Cardio', y='Passo_Decimale', color='Zona Cardio', category_orders={"Zona Cardio": zone_labels}, template="plotly_dark")
-                fig_z.update_yaxes(autorange="reversed")
-                st.plotly_chart(fig_z, use_container_width=True)
-
-            # TAB 4: ALGORITMO PROGRESSI
-            with tabs[4]:
-                st.header("🔍 Report Intelligente")
+            df_f['Indice_Eff'] = (1 / df_f['Passo_Decimale']) / df_f['FC Media'] * 1000
+            data_taglio = df_f['Data'].max() - timedelta(days=30)
+            recenti = df_f[df_f['Data'] >= data_taglio]
+            storici = df_f[df_f['Data'] < data_taglio]
+            
+            if not recenti.empty and not storici.empty:
+                eff_r, eff_s = recenti['Indice_Eff'].mean(), storici['Indice_Eff'].mean()
+                delta = ((eff_r - eff_s) / eff_s) * 100
                 
+                # Prepariamo la sintesi per l'AI
+                sintesi = f"""
+                - Sport analizzati: {sport}
+                - Numero attività recenti: {len(recenti)}
+                - Efficienza Aerobica attuale: {eff_r:.2f} (Variazione: {delta:.1f}%)
+                - Tempo totale recente: {int(recenti['Tempo_Minuti'].sum())} minuti
+                - Distribuzione Zone: {recenti['Zona Cardio'].value_counts(normalize=True).to_dict()}
+                - FC Media recente: {recenti['FC Media'].mean():.0f} bpm
+                """
                 
-                # Calcolo Indice Efficienza (Velocità / FC)
-                df_f['Indice_Eff'] = (1 / df_f['Passo_Decimale']) / df_f['FC Media'] * 1000
+                if st.button("Genera Analisi Coach AI"):
+                    with st.spinner("Gemini sta analizzando i tuoi progressi..."):
+                        risposta = chiedi_a_gemini(sintesi)
+                        st.markdown("---")
+                        st.subheader("📋 Il responso del Coach")
+                        st.write(risposta)
                 
-                data_taglio = df_f['Data'].max() - timedelta(days=30)
-                recenti = df_f[df_f['Data'] >= data_taglio]
-                storici = df_f[df_f['Data'] < data_taglio]
-                
-                if not recenti.empty and not storici.empty:
-                    eff_r, eff_s = recenti['Indice_Eff'].mean(), storici['Indice_Eff'].mean()
-                    delta = ((eff_r - eff_s) / eff_s) * 100
-                    
-                    c1, c2 = st.columns(2)
-                    c1.metric("Indice Efficienza Aerobica", f"{eff_r:.2f}", f"{delta:.1f}%")
-                    c2.metric("Volume Recente (30gg)", f"{int(recenti['Tempo_Minuti'].sum())} min")
-                    
-                    st.markdown("---")
-                    if delta > 1.5:
-                        st.success("🚀 **Analisi:** Il tuo cuore è più efficiente! Produci più velocità con meno battiti.")
-                    elif delta < -1.5:
-                        st.warning("⚠️ **Analisi:** Calo di efficienza rilevato. Possibile sovrallenamento o necessità di fondo lento (Z2).")
-                    else:
-                        st.info("⚖️ **Analisi:** Performance stabile. Continua con il piano attuale.")
-                    
-                    fig_eff = px.scatter(df_f, x='Data', y='Indice_Eff', trendline="ols", template="plotly_dark", title="Trend Efficienza (Salire = Migliorare)")
-                    st.plotly_chart(fig_eff, use_container_width=True)
-                else:
-                    st.info("Dati insufficienti per il confronto temporale (necessari almeno 30 giorni di storico).")
+                st.markdown("---")
+                st.metric("Indice Efficienza (Salire = Migliorare)", f"{eff_r:.2f}", f"{delta:.1f}%")
+                fig_eff = px.scatter(df_f, x='Data', y='Indice_Eff', trendline="ols", template="plotly_dark")
+                st.plotly_chart(fig_eff, use_container_width=True)
+            else:
+                st.info("Carica almeno 30 giorni di dati per attivare l'analisi AI.")
 
-            with tabs[5]:
-                st.dataframe(df_f.drop(columns=['Tempo_TD', 'Passo_Decimale', 'Indice_Eff']), use_container_width=True, hide_index=True)
-        else:
-            st.warning("Nessun dato corrispondente ai filtri selezionati.")
+        with tabs[5]:
+            st.dataframe(df_f.drop(columns=['Tempo_TD', 'Passo_Decimale', 'Indice_Eff']), use_container_width=True)
