@@ -56,34 +56,35 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
     elif fc <= z4: return "Z4 (Soglia)"
     else: return "Z5 (Massimale)"
 
-def chiedi_a_gemini(sintesi_dati):
-    try:
-        # Usiamo il nome del modello specifico per la versione Free stabile
-        model = genai.GenerativeModel(model_name='gemini-1.5-flash-latest')
-        
-        prompt = f"""
-        Sei un esperto coach sportivo e analista dati. 
-        Analizza questi parametri di allenamento dell'atleta:
-        {sintesi_dati}
-        
-        Fornisci:
-        1. Stato di forma (Miglioramento/Stallo/Affaticamento).
-        2. Un consiglio tecnico pratico basato sulla distribuzione delle zone cardio.
-        3. Un commento sull'efficienza aerobica.
-        
-        Rispondi in italiano, sii breve ma molto tecnico.
-        """
-        # Configurazione per evitare blocchi di sicurezza standard su dati tecnici
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        # Se fallisce ancora, proviamo il fallback sul modello base pro
-        try:
-            model_fallback = genai.GenerativeModel('gemini-1.5-pro')
-            return model_fallback.generate_content(prompt).text
-        except:
-            return f"Errore di connessione API: {e}. Verifica che la chiave sia attiva su AI Studio."
+# ==========================================
+# 1. CONFIGURAZIONE AI (CORRETTA PER PIANO FREE)
+# ==========================================
+GOOGLE_API_KEY = "AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY"
 
+# Forza la configurazione sulla versione v1 (stabile)
+genai.configure(api_key=GOOGLE_API_KEY)
+
+def chiedi_a_gemini(sintesi_dati):
+    # Prova una lista di nomi modelli dal più recente al più compatibile
+    modelli_da_provare = ['gemini-1.5-flash', 'gemini-1.0-pro', 'gemini-pro']
+    
+    prompt = f"""
+    Sei un esperto coach sportivo. Analizza questi dati:
+    {sintesi_dati}
+    Fornisci un commento tecnico su forma, efficienza e consigli in italiano.
+    """
+    
+    ultimo_errore = ""
+    for nome_modello in modelli_da_provare:
+        try:
+            model = genai.GenerativeModel(nome_modello)
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            ultimo_errore = str(e)
+            continue # Prova il modello successivo nella lista
+            
+    return f"Nessun modello disponibile. Errore finale: {ultimo_errore}"
 # ==========================================
 # 2. ACCESSO
 # ==========================================
