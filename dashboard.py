@@ -4,19 +4,17 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
-
-# --- NUOVO IMPORT CORRETTO PER GOOGLE-GENAI ---
-try:
-    from google import genai
-    # Se l'import sopra fallisce su certi sistemi, questo è il backup
-except ImportError:
-    import google.genai as genai
+from google import genai  
 
 # ==========================================
-# 1. CONFIGURAZIONE & LOGICA DATI
+# 0. CONFIGURAZIONE PAGINA (Deve essere il primo comando Streamlit)
 # ==========================================
-GOOGLE_API_KEY = "AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY"
-genai.configure(api_key=GOOGLE_API_KEY)
+st.set_page_config(page_title="Fitness AI Dashboard", layout="wide")
+
+# ==========================================
+# 1. LOGICA DATI
+# ==========================================
+API_KEY = "AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY"
 
 @st.cache_data
 def load_data():
@@ -63,30 +61,25 @@ def assegna_zona_custom(fc, z1, z2, z3, z4):
     else: return "Z5 (Massimale)"
 
 # ==========================================
-# CONFIGURAZIONE AI
+# 3. FUNZIONE AI (PULITA)
 # ==========================================
-# Inizializzazione diretta e sicura
-try:
-    client = genai.Client(api_key="AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY")
-    AI_READY = True
-except Exception as e:
-    st.sidebar.warning(f"AI non pronta: {e}")
-    AI_READY = False
-
 def chiedi_a_gemini(sintesi_dati):
-    if not AI_READY:
-        return "Servizio AI non disponibile al momento."
     try:
-        # Nota: con la versione 0.3.0 la sintassi è questa
+        # Il client della nuova libreria si configura qui
+        client = genai.Client(api_key=API_KEY)
+        
+        prompt = f"Sei un coach sportivo esperto. Analizza questi dati e rispondi in modo tecnico e motivante in italiano: {sintesi_dati}"
+        
         response = client.models.generate_content(
             model="gemini-1.5-flash",
-            contents=f"Sei un coach sportivo esperto. Analizza questi dati e rispondi in italiano: {sintesi_dati}"
+            contents=prompt
         )
         return response.text
     except Exception as e:
-        return f"Errore durante l'analisi: {e}"
+        return f"Errore Coach AI: {e}"
+
 # ==========================================
-# 2. ACCESSO
+# 4. ACCESSO E UI
 # ==========================================
 if "password_correct" not in st.session_state:
     st.session_state.password_correct = False
@@ -99,18 +92,16 @@ if not st.session_state.password_correct:
             st.session_state.password_correct = True
             st.rerun()
 else:
-    # --- DASHBOARD ATTIVA ---
-    st.set_page_config(page_title="Fitness AI Dashboard", layout="wide")
     df = load_data()
 
     if not df.empty:
-        # --- SIDEBAR (RIPRISTINATA) ---
+        # --- SIDEBAR ---
         st.sidebar.header("🎯 Filtri Attività")
         sport = st.sidebar.multiselect("Sport", sorted(df['Tipo di attivita'].unique()), default=df['Tipo di attivita'].unique())
         date_range = st.sidebar.date_input("Periodo", [df['Data'].min().date(), df['Data'].max().date()])
         
         st.sidebar.markdown("---")
-        st.sidebar.subheader("⚙️ Soglie Cardio (BPM)")
+        st.sidebar.subheader("⚙️ Soglie Cardio")
         z1 = st.sidebar.number_input("Fine Z1", value=130)
         z2 = st.sidebar.number_input("Fine Z2", value=145)
         z3 = st.sidebar.number_input("Fine Z3", value=160)
@@ -130,7 +121,7 @@ else:
         f_disl = q_slider("⛰️ Dislivello (m)", 'Ascesa totale', "f_disl")
         f_te = q_slider("📈 TE Aerobico", 'TE aerobico', "f_te")
 
-        # --- ELABORAZIONE DATI ---
+        # --- FILTRAGGIO ---
         df['Zona Cardio'] = df['FC Media'].apply(lambda x: assegna_zona_custom(x, z1, z2, z3, z4))
         
         mask = (
@@ -145,24 +136,20 @@ else:
         df_f = df.loc[mask].sort_values(by='Data')
 
         # --- TABS ---
-        tabs = st.tabs(["🚀 Trend Passo & FC", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone", "🤖 COACH AI", "📋 Dati"])
+        tabs = st.tabs(["🚀 Trend", "📊 Analisi TE", "❤️ Cuore", "🔥 Zone", "🤖 COACH AI", "📋 Dati"])
         
         with tabs[0]:
-            st.subheader("Relazione tra Velocità e Sforzo")
             df_p = df_f.dropna(subset=['Passo_Decimale', 'FC Media'])
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=df_p['Data'], y=df_p['Passo_Decimale'], name="Passo", yaxis="y1", line=dict(color='#00CC96')))
             fig.add_trace(go.Scatter(x=df_p['Data'], y=df_p['FC Media'], name="FC Media", yaxis="y2", line=dict(color='#EF553B', dash='dot')))
             fig.update_layout(template="plotly_dark", yaxis=dict(title="Passo", autorange="reversed"), yaxis2=dict(title="FC", side="right", overlaying="y", showgrid=False))
-            st.plotly_chart(fig, use_container_width=True)
-
-        with tabs[1]:
-            st.plotly_chart(px.scatter(df_f, x='Tempo_Minuti', y='TE aerobico', color='Tipo di attivita', size='Calorie', trendline="ols", template="plotly_dark"), use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
         with tabs[3]:
             fig_z = px.box(df_f, x='Zona Cardio', y='Passo_Decimale', color='Zona Cardio', category_orders={"Zona Cardio": zone_labels}, template="plotly_dark")
             fig_z.update_yaxes(autorange="reversed")
-            st.plotly_chart(fig_z, use_container_width=True)
+            st.plotly_chart(fig_z, width='stretch')
 
         with tabs[4]:
             st.header("🤖 Analisi Coach Gemini AI")
@@ -184,11 +171,12 @@ else:
                 if st.button("🚀 Chiedi parere al Coach AI"):
                     sintesi = f"Efficienza: {eff_r:.2f}, Delta: {delta:.1f}%, Zone: {recenti['Zona Cardio'].value_counts().to_dict()}"
                     with st.spinner("Analisi in corso..."):
+                        st.markdown("---")
                         st.info(chiedi_a_gemini(sintesi))
                 
-                st.plotly_chart(px.scatter(df_f, x='Data', y='Indice_Eff', trendline="ols", template="plotly_dark"), use_container_width=True)
+                st.plotly_chart(px.scatter(df_f, x='Data', y='Indice_Eff', trendline="ols", template="plotly_dark"), width='stretch')
             else:
                 st.info("Dati insufficienti per il report AI.")
 
         with tabs[5]:
-            st.dataframe(df_f.drop(columns=['Indice_Eff']) if 'Indice_Eff' in df_f.columns else df_f, use_container_width=True)
+            st.dataframe(df_f.drop(columns=['Indice_Eff']) if 'Indice_Eff' in df_f.columns else df_f, width='stretch')
