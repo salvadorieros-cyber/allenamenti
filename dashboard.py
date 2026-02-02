@@ -4,7 +4,10 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
-from google import genai  # SDK google-genai 0.3.0
+try:
+    import google.genai as genai
+except ImportError:
+    from google import genai
 
 # ==========================================
 # 1. CONFIGURAZIONE PAGINA
