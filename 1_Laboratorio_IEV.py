@@ -2,80 +2,129 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import plotly.graph_objects as go
+from pathlib import Path
+from datetime import datetime
 
 st.set_page_config(page_title="Laboratorio IEV", layout="wide")
 
-# --- FUNZIONE CARICAMENTO (Identica alla principale per coerenza) ---
-def load_data_lab():
-    conn = sqlite3.connect('Allenamenti.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-    tables = cursor.fetchall()
-    if not tables: return pd.DataFrame()
-    df = pd.read_sql_query(f"SELECT * FROM '{tables[0][0]}'", conn)
-    conn.close()
-    
-    # Pulizia minima necessaria
-    df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
-    for col in ['Distanza', 'Ascesa totale', 'FC Media']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
-    
-    if 'Tempo' in df.columns:
-        df['Tempo_Ore'] = pd.to_timedelta(df['Tempo'].astype(str), errors='coerce').dt.total_seconds() / 3600
-        
-    if 'Passo medio' in df.columns:
-        def p_to_d(p):
+st.title("🧪 Laboratorio IEV – Efficienza con Peso")
+
+# ======================================================
+# 1. LETTURA DATABASE (MULTIPAGE SAFE)
+# ======================================================
+@st.cache_data
+def load_data():
+    try:
+        base_path = Path(__file__).resolve().parent.parent
+        db_path = base_path / "allenamenti.db"
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        table_name = cursor.fetchone()[0]
+
+        df = pd.read_sql(f"SELECT * FROM '{table_name}'", conn)
+        conn.close()
+
+        df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
+
+        # Pulizia numerica
+        num_cols = ["FC Media", "FC max", "Distanza", "Ascesa totale"]
+        for c in num_cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        # Tempo
+        df["Tempo_TD"] = pd.to_timedelta(df["Tempo"], errors="coerce")
+        df["Tempo_min"] = df["Tempo_TD"].dt.total_seconds() / 60
+
+        # Passo mm:ss → decimale
+        def passo_to_dec(p):
             try:
-                parts = str(p).split(':')
-                return int(parts[0]) + int(parts[1])/60 if len(parts)==2 else None
-            except: return None
-        df['Passo_Decimale'] = df['Passo medio'].apply(p_to_d)
-    
-    return df.dropna(subset=['Data', 'FC Media', 'Tempo_Ore'])
+                m, s = str(p).split(":")
+                return int(m) + int(s) / 60
+            except:
+                return None
 
-# --- LOGICA DEL LABORATORIO ---
-st.title("🏔️ Laboratorio Efficienza Verticale")
-st.markdown("""
-In questa pagina testiamo la formula: 
-$$IEV = \\frac{\\text{Km} + (\\text{D+} / 100)}{\\text{FC Media} \\times \\text{Ore}} \\times 100$$
-""")
+        df["Passo_dec"] = df["Passo medio"].apply(passo_to_dec)
 
-df = load_data_lab()
+        return df.dropna(subset=["Data", "Passo_dec", "FC Media", "Tempo_min"])
 
-if not df.empty:
-    # Sidebar specifica per i test
-    st.sidebar.header("Parametri di Test")
-    peso_dislivello = st.sidebar.slider("Peso Dislivello (D+/X)", 10, 200, 100)
-    
-    # Ricalcolo IEV dinamico basato sul laboratorio
-    df['IE_std'] = (1 / df['Passo_Decimale'].replace(0, 1)) / df['FC Media'] * 1000
-    df['IEV_test'] = ((df['Distanza'] + (df['Ascesa totale'] / peso_dislivello)) / 
-                      (df['FC Media'] * df['Tempo_Ore'])) * 100
+    except Exception as e:
+        st.error(f"Errore caricamento dati: {e}")
+        return pd.DataFrame()
 
-    # Grafico di analisi
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df['Data'], y=df['IE_std'], name="Efficienza Velocità", line=dict(color='cyan')))
-    fig.add_trace(go.Scatter(x=df['Data'], y=df['IEV_test'], name="Efficienza Verticale (Test)", yaxis="y2", line=dict(color='orange', width=3)))
-    
-    fig.update_layout(
-        template="plotly_dark",
-        yaxis=dict(title="Standard"),
-        yaxis2=dict(title="Verticale", overlaying="y", side="right"),
-        legend=dict(orientation="h", y=1.1)
+df = load_data()
+
+if df.empty:
+    st.stop()
+
+# ======================================================
+# 2. INPUT PESO (INTERPOLAZIONE)
+# ======================================================
+st.sidebar.header("⚖️ Peso Atleta")
+
+peso_start = st.sidebar.number_input("Peso iniziale (kg)", value=75.0)
+data_start = st.sidebar.date_input("Data peso iniziale", df["Data"].min())
+
+peso_end = st.sidebar.number_input("Peso finale (kg)", value=72.0)
+data_end = st.sidebar.date_input("Data peso finale", df["Data"].max())
+
+# interpolazione lineare peso nel tempo
+df["peso"] = peso_start + (
+    (df["Data"] - pd.to_datetime(data_start)).dt.days /
+    max((pd.to_datetime(data_end) - pd.to_datetime(data_start)).days, 1)
+) * (peso_end - peso_start)
+
+df["peso"] = df["peso"].clip(lower=40, upper=120)
+
+# ======================================================
+# 3. FORMULA IEV CON PESO (NUOVA)
+# ======================================================
+"""
+IEV_peso =
+    velocità (m/s)
+    -------------------------
+    FC_relativa × peso × carico verticale
+"""
+
+df["vel_ms"] = 1000 / (df["Passo_dec"] * 60)
+df["FC_rel"] = df["FC Media"] / df["FC max"]
+df["carico_vert"] = 1 + (df["Ascesa totale"] / df["Tempo_min"]) / 10
+
+df["IEV_peso"] = df["vel_ms"] / (df["FC_rel"] * df["peso"] * df["carico_vert"])
+df["IEV_plot"] = df["IEV_peso"] * 1000  # scala visiva
+
+# ======================================================
+# 4. GRAFICO
+# ======================================================
+st.subheader("📈 Andamento IEV (normalizzato per Peso)")
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=df["Data"],
+    y=df["IEV_plot"],
+    mode="lines+markers",
+    name="IEV peso"
+))
+
+fig.update_layout(
+    template="plotly_dark",
+    yaxis_title="Indice Efficienza (peso-normalizzato)",
+    xaxis_title="Data"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# ======================================================
+# 5. DEBUG VISIVO
+# ======================================================
+with st.expander("🔍 Dettaglio calcolo"):
+    st.dataframe(
+        df[[
+            "Data", "Passo_dec", "FC Media", "peso",
+            "vel_ms", "FC_rel", "carico_vert", "IEV_plot"
+        ]].sort_values("Data"),
+        use_container_width=True
     )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Analisi dei dati estremi
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Top 5 Allenamenti (Verticali)")
-        st.write(df.nlargest(5, 'IEV_test')[['Data', 'Tipo di attivita', 'Distanza', 'Ascesa totale', 'IEV_test']])
-    
-    with col2:
-        st.subheader("Osservazioni Laboratorio")
-        st.info(f"Stai usando un fattore di correzione di {peso_dislivello}. Più abbassi questo valore, più il dislivello 'premia' il tuo indice finale.")
-
-else:
-    st.error("Dati non caricati. Verifica Allenamenti.db")
