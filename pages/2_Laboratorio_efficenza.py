@@ -152,21 +152,24 @@ fig2 = px.scatter(
 fig2.update_yaxes(autorange="reversed")
 st.plotly_chart(fig2, width="stretch")
 
+
 # ==========================================================
 # GRAFICO 3 – Velocità equivalente nel tempo
 # ==========================================================
 st.subheader("⛰️ Velocità Equivalente (per trail)")
 
-df["Trend_Vel_eq"] = trendline(
-    (df["Data"] - df["Data"].min()).dt.days,
-    df["Vel_eq"]
-)
+# Pulizia dati per evitare crash nella regressione
+df = df.dropna(subset=["Vel_eq"])
+df = df[df["Vel_eq"].replace([np.inf, -np.inf], np.nan).notna()]
 
-fig3 = go.Figure()
-fig3.add_trace(go.Scatter(x=df["Data"], y=df["Vel_eq"], mode="markers+lines", name="Vel_eq"))
-fig3.add_trace(go.Scatter(x=df["Data"], y=df["Trend_Vel_eq"], name="Trend", line=dict(color="orange", dash="dash")))
-fig3.update_layout(template="plotly_dark")
-st.plotly_chart(fig3, width="stretch")
+if len(df) > 1:
+    df["Trend_Vel_eq"] = trendline(
+        (df["Data"] - df["Data"].min()).dt.days,
+        df["Vel_eq"]
+    )
+
+    fig3 = go.Figure()
+    fig3.add_trace(go.Scatter(x=df["Data"],
 
 # ==========================================================
 # GRAFICO 4 – Efficienza metabolica (TE / Tempo)
