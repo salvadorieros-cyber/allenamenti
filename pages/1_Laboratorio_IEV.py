@@ -18,28 +18,42 @@ def load_data():
         base_path = Path(__file__).resolve().parent.parent
         db_path = base_path / "allenamenti.db"
 
+        if not db_path.exists():
+            st.error(f"Database non trovato: {db_path}")
+            return pd.DataFrame()
+
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        table_name = cursor.fetchone()[0]
+        tables = cursor.fetchall()
+
+        if not tables:
+            st.error("Il database esiste ma non contiene tabelle.")
+            conn.close()
+            return pd.DataFrame()
+
+        table_name = tables[0][0]  # prima tabella disponibile
 
         df = pd.read_sql(f"SELECT * FROM '{table_name}'", conn)
         conn.close()
 
+        # =============================
+        # PULIZIA DATI
+        # =============================
         df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
 
-        # Pulizia numerica
         num_cols = ["FC Media", "FC max", "Distanza", "Ascesa totale"]
         for c in num_cols:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
 
         # Tempo
-        df["Tempo_TD"] = pd.to_timedelta(df["Tempo"], errors="coerce")
-        df["Tempo_min"] = df["Tempo_TD"].dt.total_seconds() / 60
+        if "Tempo" in df.columns:
+            df["Tempo_TD"] = pd.to_timedelta(df["Tempo"], errors="coerce")
+            df["Tempo_min"] = df["Tempo_TD"].dt.total_seconds() / 60
 
-        # Passo mm:ss → decimale
+        # Passo
         def passo_to_dec(p):
             try:
                 m, s = str(p).split(":")
@@ -47,18 +61,17 @@ def load_data():
             except:
                 return None
 
-        df["Passo_dec"] = df["Passo medio"].apply(passo_to_dec)
+        if "Passo medio" in df.columns:
+            df["Passo_dec"] = df["Passo medio"].apply(passo_to_dec)
 
-        return df.dropna(subset=["Data", "Passo_dec", "FC Media", "Tempo_min"])
+        df = df.dropna(subset=["Data", "Passo_dec", "FC Media", "Tempo_min"])
+
+        return df
 
     except Exception as e:
         st.error(f"Errore caricamento dati: {e}")
         return pd.DataFrame()
 
-df = load_data()
-
-if df.empty:
-    st.stop()
 
 # ======================================================
 # 2. INPUT PESO (INTERPOLAZIONE)
