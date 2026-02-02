@@ -1,11 +1,10 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
-import numpy as np
-from datetime import timedelta
 
 # ==========================================================
 # CONFIG
@@ -29,6 +28,7 @@ def load_data():
         df = pd.read_sql_query(f"SELECT * FROM '{table[0]}'", conn)
         conn.close()
 
+        # Date
         df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
 
         # Conversioni numeriche
@@ -43,7 +43,7 @@ def load_data():
                 )
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        # Tempo in minuti e ore
+        # Tempo
         if "Tempo" in df.columns:
             df["Tempo_TD"] = pd.to_timedelta(df["Tempo"], errors="coerce")
             df["Tempo_Minuti"] = df["Tempo_TD"].dt.total_seconds() / 60
@@ -101,8 +101,10 @@ if df.empty:
 # CALCOLO METRICHE DI EFFICIENZA
 # ==========================================================
 
-# Efficienza FC → velocità / FC
+# Velocità km/h
 df["Velocità_kmh"] = df["Distanza"] / df["Tempo_Ore"]
+
+# Efficienza FC → velocità / FC
 df["Eff_FC"] = df["Velocità_kmh"] / df["FC Media"]
 
 # Velocità equivalente (per trail)
@@ -112,10 +114,21 @@ df["Vel_eq"] = (df["Distanza"] + df["Ascesa totale"] / 100) / df["Tempo_Ore"]
 df["Eff_TE"] = df["TE aerobico"] / df["Tempo_Minuti"]
 
 # ==========================================================
-# FUNZIONE TRENDLINE
+# FUNZIONE TRENDLINE SICURA
 # ==========================================================
-def trendline(x, y):
-    X = np.array(x).reshape(-1, 1)
+def safe_trendline(x, y):
+    x = np.array(x)
+    y = np.array(y)
+
+    # Rimuove NaN e inf
+    mask = (~np.isnan(x)) & (~np.isnan(y)) & (~np.isinf(x)) & (~np.isinf(y))
+    x = x[mask]
+    y = y[mask]
+
+    if len(x) < 2:
+        return None  # impossibile calcolare trend
+
+    X = x.reshape(-1, 1)
     model = LinearRegression()
     model.fit(X, y)
     return model.predict(X)
@@ -125,14 +138,15 @@ def trendline(x, y):
 # ==========================================================
 st.subheader("📈 Efficienza FC (Velocità / FC)")
 
-df["Trend_Eff_FC"] = trendline(
-    (df["Data"] - df["Data"].min()).dt.days,
-    df["Eff_FC"]
-)
+x_days = (df["Data"] - df["Data"].min()).dt.days
+trend = safe_trendline(x_days, df["Eff_FC"])
 
 fig1 = go.Figure()
 fig1.add_trace(go.Scatter(x=df["Data"], y=df["Eff_FC"], mode="markers+lines", name="Efficienza FC"))
-fig1.add_trace(go.Scatter(x=df["Data"], y=df["Trend_Eff_FC"], name="Trend", line=dict(color="yellow", dash="dash")))
+
+if trend is not None:
+    fig1.add_trace(go.Scatter(x=df["Data"], y=trend, name="Trend", line=dict(color="yellow", dash="dash")))
+
 fig1.update_layout(template="plotly_dark")
 st.plotly_chart(fig1, width="stretch")
 
@@ -152,38 +166,35 @@ fig2 = px.scatter(
 fig2.update_yaxes(autorange="reversed")
 st.plotly_chart(fig2, width="stretch")
 
-
 # ==========================================================
 # GRAFICO 3 – Velocità equivalente nel tempo
 # ==========================================================
 st.subheader("⛰️ Velocità Equivalente (per trail)")
 
-# Pulizia dati per evitare crash nella regressione
-df = df.dropna(subset=["Vel_eq"])
-df = df[df["Vel_eq"].replace([np.inf, -np.inf], np.nan).notna()]
+trend_vel = safe_trendline(x_days, df["Vel_eq"])
 
-if len(df) > 1:
-    df["Trend_Vel_eq"] = trendline(
-        (df["Data"] - df["Data"].min()).dt.days,
-        df["Vel_eq"]
-    )
+fig3 = go.Figure()
+fig3.add_trace(go.Scatter(x=df["Data"], y=df["Vel_eq"], mode="markers+lines", name="Vel_eq"))
 
-    fig3 = go.Figure()
-    fig3.add_trace(go.Scatter(x=df["Data"],
+if trend_vel is not None:
+    fig3.add_trace(go.Scatter(x=df["Data"], y=trend_vel, name="Trend", line=dict(color="orange", dash="dash")))
+
+fig3.update_layout(template="plotly_dark")
+st.plotly_chart(fig3, width="stretch")
 
 # ==========================================================
 # GRAFICO 4 – Efficienza metabolica (TE / Tempo)
 # ==========================================================
 st.subheader("🔥 Efficienza Metabolica (TE / Tempo)")
 
-df["Trend_Eff_TE"] = trendline(
-    (df["Data"] - df["Data"].min()).dt.days,
-    df["Eff_TE"]
-)
+trend_te = safe_trendline(x_days, df["Eff_TE"])
 
 fig4 = go.Figure()
 fig4.add_trace(go.Scatter(x=df["Data"], y=df["Eff_TE"], mode="markers+lines", name="Efficienza TE"))
-fig4.add_trace(go.Scatter(x=df["Data"], y=df["Trend_Eff_TE"], name="Trend", line=dict(color="green", dash="dash")))
+
+if trend_te is not None:
+    fig4.add_trace(go.Scatter(x=df["Data"], y=trend_te, name="Trend", line=dict(color="green", dash="dash")))
+
 fig4.update_layout(template="plotly_dark")
 st.plotly_chart(fig4, width="stretch")
 
