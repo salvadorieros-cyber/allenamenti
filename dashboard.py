@@ -4,10 +4,17 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
+
+# --- IMPORT AI BLINDATO ---
 try:
-    import google.genai as genai
-except ImportError:
+    # Proviamo l'importazione standard
     from google import genai
+except ImportError:
+    try:
+        # Se fallisce, proviamo l'importazione diretta dal namespace
+        import google.genai as genai
+    except ImportError:
+        st.error("Errore critico: Modulo 'google-genai' non trovato. Controlla il file requirements.txt")
 
 # ==========================================
 # 1. CONFIGURAZIONE PAGINA
