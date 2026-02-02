@@ -7,3 +7,4 @@ statsmodels==0.14.1
 scipy==1.15.3
 patsy==1.0.2
 google-genai==0.3.0
+scikit-learn
