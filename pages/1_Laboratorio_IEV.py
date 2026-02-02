@@ -3,141 +3,181 @@ import sqlite3
 import pandas as pd
 import plotly.graph_objects as go
 from pathlib import Path
-from datetime import datetime
 
+# ==========================================================
+# CONFIG
+# ==========================================================
 st.set_page_config(page_title="Laboratorio IEV", layout="wide")
 
-st.title("🧪 Laboratorio IEV – Efficienza con Peso")
-
-# ======================================================
-# 1. LETTURA DATABASE (MULTIPAGE SAFE)
-# ======================================================
+# ==========================================================
+# LOAD DATA FROM SQLITE
+# ==========================================================
 @st.cache_data
 def load_data():
     try:
         base_path = Path(__file__).resolve().parent.parent
-        db_path = base_path / "allenamenti.db"
-
-        if not db_path.exists():
-            st.error(f"Database non trovato: {db_path}")
-            return pd.DataFrame()
+        db_path = base_path / "Allenamenti.db"
 
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = cursor.fetchall()
-
-        if not tables:
-            st.error("Il database esiste ma non contiene tabelle.")
-            conn.close()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        table = cursor.fetchone()
+        if table is None:
             return pd.DataFrame()
 
-        table_name = tables[0][0]  # prima tabella disponibile
-
-        df = pd.read_sql(f"SELECT * FROM '{table_name}'", conn)
+        df = pd.read_sql_query(f"SELECT * FROM '{table[0]}'", conn)
         conn.close()
 
-        # =============================
-        # PULIZIA DATI
-        # =============================
+        # --- DATE ---
         df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
 
-        num_cols = ["FC Media", "FC max", "Distanza", "Ascesa totale"]
-        for c in num_cols:
-            if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
+        # --- NUMERIC CLEAN ---
+        numeric_cols = [
+            "FC Media", "Distanza", "Ascesa totale",
+            "Calorie", "TE aerobico"
+        ]
 
-        # Tempo
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .str.replace(".", "", regex=False)
+                    .str.replace(",", ".", regex=False)
+                )
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # --- TIME ---
         if "Tempo" in df.columns:
             df["Tempo_TD"] = pd.to_timedelta(df["Tempo"], errors="coerce")
-            df["Tempo_min"] = df["Tempo_TD"].dt.total_seconds() / 60
+            df["Tempo_Ore"] = df["Tempo_TD"].dt.total_seconds() / 3600
 
-        # Passo
-        def passo_to_dec(p):
-            try:
-                m, s = str(p).split(":")
-                return int(m) + int(s) / 60
-            except:
-                return None
-
+        # --- PACE ---
         if "Passo medio" in df.columns:
-            df["Passo_dec"] = df["Passo medio"].apply(passo_to_dec)
+            def pace_to_float(p):
+                try:
+                    m, s = str(p).split(":")
+                    return int(m) + int(s) / 60
+                except:
+                    return None
 
-        df = df.dropna(subset=["Data", "Passo_dec", "FC Media", "Tempo_min"])
+            df["Passo_Decimale"] = df["Passo medio"].apply(pace_to_float)
 
-        return df
+        return df.dropna(subset=["Data"])
 
     except Exception as e:
         st.error(f"Errore caricamento dati: {e}")
         return pd.DataFrame()
 
 
-# ======================================================
-# 2. INPUT PESO (INTERPOLAZIONE)
-# ======================================================
-st.sidebar.header("⚖️ Peso Atleta")
+# ==========================================================
+# APP
+# ==========================================================
+st.title("🧪 Laboratorio IEV – Efficienza Reale")
 
-peso_start = st.sidebar.number_input("Peso iniziale (kg)", value=75.0)
-data_start = st.sidebar.date_input("Data peso iniziale", df["Data"].min())
+df = load_data()
+if df.empty:
+    st.warning("Database non trovato o vuoto.")
+    st.stop()
 
-peso_end = st.sidebar.number_input("Peso finale (kg)", value=72.0)
-data_end = st.sidebar.date_input("Data peso finale", df["Data"].max())
+# ==========================================================
+# SIDEBAR – PESO
+# ==========================================================
+st.sidebar.header("⚖️ Peso atleta")
 
-# interpolazione lineare peso nel tempo
-df["peso"] = peso_start + (
-    (df["Data"] - pd.to_datetime(data_start)).dt.days /
-    max((pd.to_datetime(data_end) - pd.to_datetime(data_start)).days, 1)
+col1, col2 = st.sidebar.columns(2)
+
+with col1:
+    peso_start = st.number_input(
+        "Peso iniziale (kg)", 40.0, 120.0, 75.0, 0.1
+    )
+    data_start = st.date_input(
+        "Data peso iniziale", df["Data"].min().date()
+    )
+
+with col2:
+    peso_end = st.number_input(
+        "Peso finale (kg)", 40.0, 120.0, 72.0, 0.1
+    )
+    data_end = st.date_input(
+        "Data peso finale", df["Data"].max().date()
+    )
+
+# ==========================================================
+# PESO INTERPOLATO
+# ==========================================================
+days_total = max(
+    (pd.to_datetime(data_end) - pd.to_datetime(data_start)).days, 1
+)
+
+df["Peso"] = peso_start + (
+    (df["Data"] - pd.to_datetime(data_start)).dt.days / days_total
 ) * (peso_end - peso_start)
 
-df["peso"] = df["peso"].clip(lower=40, upper=120)
+df["Peso"] = df["Peso"].clip(40, 120)
 
-# ======================================================
-# 3. FORMULA IEV CON PESO (NUOVA)
-# ======================================================
+# ==========================================================
+# FORMULA IEV (CORRETTA E NON PIATTA)
+# ==========================================================
 """
-IEV_peso =
-    velocità (m/s)
-    -------------------------
-    FC_relativa × peso × carico verticale
+IEV = ( Velocità_equivalente ) / ( FC * Peso )
+
+Velocità_equivalente = (Distanza + Dislivello/100) / Ore
 """
 
-df["vel_ms"] = 1000 / (df["Passo_dec"] * 60)
-df["FC_rel"] = df["FC Media"] / df["FC max"]
-df["carico_vert"] = 1 + (df["Ascesa totale"] / df["Tempo_min"]) / 10
+df = df.dropna(subset=[
+    "Distanza", "Ascesa totale", "Tempo_Ore",
+    "FC Media", "Peso"
+])
 
-df["IEV_peso"] = df["vel_ms"] / (df["FC_rel"] * df["peso"] * df["carico_vert"])
-df["IEV_plot"] = df["IEV_peso"] * 1000  # scala visiva
+df["Vel_eq"] = (df["Distanza"] + df["Ascesa totale"] / 100) / df["Tempo_Ore"]
 
-# ======================================================
-# 4. GRAFICO
-# ======================================================
-st.subheader("📈 Andamento IEV (normalizzato per Peso)")
+df["IEV"] = df["Vel_eq"] / (df["FC Media"] * df["Peso"]) * 1000
+
+# ==========================================================
+# GRAFICO
+# ==========================================================
+st.subheader("📈 Andamento Efficienza (IEV)")
 
 fig = go.Figure()
+
 fig.add_trace(go.Scatter(
     x=df["Data"],
-    y=df["IEV_plot"],
+    y=df["IEV"],
     mode="lines+markers",
-    name="IEV peso"
+    name="IEV",
+    line=dict(width=3)
+))
+
+fig.add_trace(go.Scatter(
+    x=df["Data"],
+    y=df["Peso"],
+    name="Peso (kg)",
+    yaxis="y2",
+    line=dict(dash="dot")
 ))
 
 fig.update_layout(
     template="plotly_dark",
-    yaxis_title="Indice Efficienza (peso-normalizzato)",
-    xaxis_title="Data"
+    yaxis=dict(title="Indice Efficienza IEV"),
+    yaxis2=dict(
+        title="Peso (kg)",
+        overlaying="y",
+        side="right",
+        showgrid=False
+    ),
+    legend=dict(orientation="h", y=1.15)
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
-# ======================================================
-# 5. DEBUG VISIVO
-# ======================================================
-with st.expander("🔍 Dettaglio calcolo"):
-    st.dataframe(
-        df[[
-            "Data", "Passo_dec", "FC Media", "peso",
-            "vel_ms", "FC_rel", "carico_vert", "IEV_plot"
-        ]].sort_values("Data"),
-        use_container_width=True
-    )
+# ==========================================================
+# DEBUG TABLE
+# ==========================================================
+with st.expander("📋 Dati di calcolo"):
+    st.dataframe(df[[
+        "Data", "Distanza", "Ascesa totale",
+        "Tempo_Ore", "FC Media", "Peso",
+        "Vel_eq", "IEV"
+    ]])
