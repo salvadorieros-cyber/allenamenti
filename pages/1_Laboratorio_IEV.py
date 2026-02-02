@@ -11,6 +11,25 @@ st.set_page_config(page_title="Laboratorio IEV", layout="wide")
 st.title("🧪 Laboratorio IEV – Efficienza Reale")
 
 # ==========================================================
+# SPIEGAZIONE FORMULA
+# ==========================================================
+st.markdown("""
+**Formula IEV (Indice di Efficienza Verticale)**
+
+\[
+IEV = \frac{Velocità\_equivalente}{FC \times Peso}
+\]
+
+dove:
+
+- **Velocità_equivalente** = (Distanza + Dislivello/100) / Ore
+- **FC** = Frequenza cardiaca media
+- **Peso** = peso interpolato tra peso iniziale e finale
+
+> L'IEV misura la tua efficienza reale, considerando velocità, pendenza, battiti e peso corporeo.
+""")
+
+# ==========================================================
 # LOAD DATA
 # ==========================================================
 @st.cache_data
@@ -60,10 +79,11 @@ if df.empty:
     st.stop()
 
 # ==========================================================
-# SIDEBAR – PESO
+# SIDEBAR – FILTRI PESO E ATTIVITÀ
 # ==========================================================
-st.sidebar.header("⚖️ Peso atleta")
+st.sidebar.header("⚖️ Peso atleta e filtri")
 
+# 1️⃣ Peso
 col1, col2 = st.sidebar.columns(2)
 
 with col1:
@@ -74,16 +94,25 @@ with col2:
     peso_end = st.number_input("Peso finale (kg)", 40.0, 120.0, 72.0, 0.1)
     data_end = st.date_input("Data peso finale", df["Data"].max().date())
 
+# 2️⃣ Tipo di attività
+attività_disponibili = sorted(df["Tipo di attivita"].dropna().unique())
+attività_scelte = st.sidebar.multiselect(
+    "Seleziona attività",
+    attività_disponibili,
+    default=attività_disponibili
+)
+
 # ==========================================================
-# FILTRO ATTIVITÀ NEL RANGE PESO
+# FILTRO ATTIVITÀ + PERIODO PESO
 # ==========================================================
 df = df[
     (df["Data"] >= pd.to_datetime(data_start)) &
-    (df["Data"] <= pd.to_datetime(data_end))
+    (df["Data"] <= pd.to_datetime(data_end)) &
+    (df["Tipo di attivita"].isin(attività_scelte))
 ].copy()
 
 if df.empty:
-    st.warning("Nessuna attività nel periodo peso selezionato.")
+    st.warning("Nessuna attività corrispondente ai filtri.")
     st.stop()
 
 # ==========================================================
@@ -102,11 +131,7 @@ df["Peso"] = df["Peso"].clip(40, 120)
 # ==========================================================
 # FORMULA IEV
 # ==========================================================
-df = df.dropna(subset=[
-    "Distanza", "Ascesa totale",
-    "Tempo_Ore", "FC Media", "Peso"
-])
-
+df = df.dropna(subset=["Distanza", "Ascesa totale", "Tempo_Ore", "FC Media", "Peso"])
 df["Vel_eq"] = (df["Distanza"] + df["Ascesa totale"] / 100) / df["Tempo_Ore"]
 df["IEV"] = df["Vel_eq"] / (df["FC Media"] * df["Peso"]) * 1000
 
@@ -130,10 +155,11 @@ iev_median = df["IEV"].median()
 # ==========================================================
 # GRAFICO
 # ==========================================================
-st.subheader("📈 Efficienza reale (IEV)")
+st.subheader("📈 Andamento Efficienza IEV")
 
 fig = go.Figure()
 
+# IEV
 fig.add_trace(go.Scatter(
     x=df["Data"],
     y=df["IEV"],
@@ -142,13 +168,64 @@ fig.add_trace(go.Scatter(
     line=dict(width=3)
 ))
 
+import numpy as np
+from sklearn.linear_model import LinearRegression
+
+# --- LINEA DI TREND ---
+X = (df["Data"] - df["Data"].min()).dt.days.values.reshape(-1, 1)
+y = df["IEV"].values
+
+model = LinearRegression()
+model.fit(X, y)
+trend = model.predict(X)
+
+# ==========================================================
+# GRAFICO
+# ==========================================================
+fig = go.Figure()
+
+# IEV
 fig.add_trace(go.Scatter(
     x=df["Data"],
-    y=[iev_median] * len(df),
-    name="Mediana IEV",
-    line=dict(dash="dash")
+    y=df["IEV"],
+    mode="lines+markers",
+    name="IEV",
+    line=dict(width=3)
 ))
 
+# Trend
+fig.add_trace(go.Scatter(
+    x=df["Data"],
+    y=trend,
+    name="Trend IEV",
+    line=dict(color="yellow", dash="dash", width=3)
+))
+
+# Peso
+fig.add_trace(go.Scatter(
+    x=df["Data"],
+    y=df["Peso"],
+    name="Peso (kg)",
+    yaxis="y2",
+    line=dict(dash="dot")
+))
+
+fig.update_layout(
+    template="plotly_dark",
+    yaxis=dict(title="Indice Efficienza IEV"),
+    yaxis2=dict(
+        title="Peso (kg)",
+        overlaying="y",
+        side="right",
+        showgrid=False
+    ),
+    legend=dict(orientation="h", y=1.15)
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+
+# Peso
 fig.add_trace(go.Scatter(
     x=df["Data"],
     y=df["Peso"],
@@ -172,10 +249,10 @@ fig.update_layout(
 st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================================
-# DEBUG
+# DEBUG / TABELLA
 # ==========================================================
 with st.expander("📋 Dati filtrati"):
     st.dataframe(df[[
-        "Data", "Distanza", "Ascesa totale",
-        "Tempo_Ore", "FC Media", "Peso", "IEV"
+        "Data", "Tipo di attivita", "Distanza", "Ascesa totale",
+        "Tempo_Ore", "FC Media", "Peso", "Vel_eq", "IEV"
     ]])
