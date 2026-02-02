@@ -3,6 +3,8 @@ import sqlite3
 import pandas as pd
 import plotly.graph_objects as go
 from pathlib import Path
+from sklearn.linear_model import LinearRegression
+import numpy as np
 
 # ==========================================================
 # CONFIG
@@ -14,19 +16,14 @@ st.title("🧪 Laboratorio IEV – Efficienza Reale")
 # SPIEGAZIONE FORMULA
 # ==========================================================
 st.markdown("""
-**Formula IEV (Indice di Efficienza Verticale)**
+**Indice di Efficienza Verticale (IEV)**
 
-\[
-IEV = \frac{Velocità\_equivalente}{FC \times Peso}
-\]
+IEV misura l’efficienza considerando:
+- velocità equivalente (distanza + dislivello / tempo)
+- frequenza cardiaca media
+- peso corporeo interpolato
 
-dove:
-
-- **Velocità_equivalente** = (Distanza + Dislivello/100) / Ore
-- **FC** = Frequenza cardiaca media
-- **Peso** = peso interpolato tra peso iniziale e finale
-
-> L'IEV misura la tua efficienza reale, considerando velocità, pendenza, battiti e peso corporeo.
+La regressione lineare indica il **trend** dell’efficienza nel tempo.
 """)
 
 # ==========================================================
@@ -40,7 +37,6 @@ def load_data():
 
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         table = cursor.fetchone()
         if table is None:
@@ -72,7 +68,6 @@ def load_data():
         st.error(f"Errore caricamento dati: {e}")
         return pd.DataFrame()
 
-
 df = load_data()
 if df.empty:
     st.warning("Database non trovato o vuoto.")
@@ -83,7 +78,6 @@ if df.empty:
 # ==========================================================
 st.sidebar.header("⚖️ Peso atleta e filtri")
 
-# 1️⃣ Peso
 col1, col2 = st.sidebar.columns(2)
 
 with col1:
@@ -94,7 +88,6 @@ with col2:
     peso_end = st.number_input("Peso finale (kg)", 40.0, 120.0, 72.0, 0.1)
     data_end = st.date_input("Data peso finale", df["Data"].max().date())
 
-# 2️⃣ Tipo di attività
 attività_disponibili = sorted(df["Tipo di attivita"].dropna().unique())
 attività_scelte = st.sidebar.multiselect(
     "Seleziona attività",
@@ -103,7 +96,7 @@ attività_scelte = st.sidebar.multiselect(
 )
 
 # ==========================================================
-# FILTRO ATTIVITÀ + PERIODO PESO
+# FILTRI BASE
 # ==========================================================
 df = df[
     (df["Data"] >= pd.to_datetime(data_start)) &
@@ -125,18 +118,17 @@ days_total = max(
 df["Peso"] = peso_start + (
     (df["Data"] - pd.to_datetime(data_start)).dt.days / days_total
 ) * (peso_end - peso_start)
-
 df["Peso"] = df["Peso"].clip(40, 120)
 
 # ==========================================================
-# FORMULA IEV
+# CALCOLO IEV
 # ==========================================================
 df = df.dropna(subset=["Distanza", "Ascesa totale", "Tempo_Ore", "FC Media", "Peso"])
 df["Vel_eq"] = (df["Distanza"] + df["Ascesa totale"] / 100) / df["Tempo_Ore"]
 df["IEV"] = df["Vel_eq"] / (df["FC Media"] * df["Peso"]) * 1000
 
 # ==========================================================
-# RIMOZIONE OUTLIER (IQR)
+# OUTLIER IQR
 # ==========================================================
 q1 = df["IEV"].quantile(0.25)
 q3 = df["IEV"].quantile(0.75)
@@ -148,43 +140,23 @@ df = df[
 ]
 
 # ==========================================================
-# MEDIANA
+# LINEA DI TREND (REGRESSIONE LINEARE)
 # ==========================================================
-iev_median = df["IEV"].median()
-
-# ==========================================================
-# GRAFICO
-# ==========================================================
-st.subheader("📈 Andamento Efficienza IEV")
-
-fig = go.Figure()
-
-# IEV
-fig.add_trace(go.Scatter(
-    x=df["Data"],
-    y=df["IEV"],
-    mode="lines+markers",
-    name="IEV",
-    line=dict(width=3)
-))
-
-import numpy as np
-from sklearn.linear_model import LinearRegression
-
-# --- LINEA DI TREND ---
+# X = giorni dal minimo (numeric)
 X = (df["Data"] - df["Data"].min()).dt.days.values.reshape(-1, 1)
 y = df["IEV"].values
 
 model = LinearRegression()
 model.fit(X, y)
-trend = model.predict(X)
+trend_vals = model.predict(X)
 
 # ==========================================================
 # GRAFICO
 # ==========================================================
+st.subheader("📈 Andamento Efficienza IEV con Trendline")
+
 fig = go.Figure()
 
-# IEV
 fig.add_trace(go.Scatter(
     x=df["Data"],
     y=df["IEV"],
@@ -193,39 +165,13 @@ fig.add_trace(go.Scatter(
     line=dict(width=3)
 ))
 
-# Trend
 fig.add_trace(go.Scatter(
     x=df["Data"],
-    y=trend,
+    y=trend_vals,
     name="Trend IEV",
-    line=dict(color="yellow", dash="dash", width=3)
+    line=dict(color="yellow", dash="dash")
 ))
 
-# Peso
-fig.add_trace(go.Scatter(
-    x=df["Data"],
-    y=df["Peso"],
-    name="Peso (kg)",
-    yaxis="y2",
-    line=dict(dash="dot")
-))
-
-fig.update_layout(
-    template="plotly_dark",
-    yaxis=dict(title="Indice Efficienza IEV"),
-    yaxis2=dict(
-        title="Peso (kg)",
-        overlaying="y",
-        side="right",
-        showgrid=False
-    ),
-    legend=dict(orientation="h", y=1.15)
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-
-# Peso
 fig.add_trace(go.Scatter(
     x=df["Data"],
     y=df["Peso"],
@@ -249,9 +195,9 @@ fig.update_layout(
 st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================================
-# DEBUG / TABELLA
+# TABELLA DEBUG
 # ==========================================================
-with st.expander("📋 Dati filtrati"):
+with st.expander("📋 Dati calcolati"):
     st.dataframe(df[[
         "Data", "Tipo di attivita", "Distanza", "Ascesa totale",
         "Tempo_Ore", "FC Media", "Peso", "Vel_eq", "IEV"
