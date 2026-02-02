@@ -8,9 +8,10 @@ from pathlib import Path
 # CONFIG
 # ==========================================================
 st.set_page_config(page_title="Laboratorio IEV", layout="wide")
+st.title("🧪 Laboratorio IEV – Efficienza Reale")
 
 # ==========================================================
-# LOAD DATA FROM SQLITE
+# LOAD DATA
 # ==========================================================
 @st.cache_data
 def load_data():
@@ -29,15 +30,9 @@ def load_data():
         df = pd.read_sql_query(f"SELECT * FROM '{table[0]}'", conn)
         conn.close()
 
-        # --- DATE ---
         df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
 
-        # --- NUMERIC CLEAN ---
-        numeric_cols = [
-            "FC Media", "Distanza", "Ascesa totale",
-            "Calorie", "TE aerobico"
-        ]
-
+        numeric_cols = ["FC Media", "Distanza", "Ascesa totale"]
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = (
@@ -48,21 +43,9 @@ def load_data():
                 )
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        # --- TIME ---
         if "Tempo" in df.columns:
             df["Tempo_TD"] = pd.to_timedelta(df["Tempo"], errors="coerce")
             df["Tempo_Ore"] = df["Tempo_TD"].dt.total_seconds() / 3600
-
-        # --- PACE ---
-        if "Passo medio" in df.columns:
-            def pace_to_float(p):
-                try:
-                    m, s = str(p).split(":")
-                    return int(m) + int(s) / 60
-                except:
-                    return None
-
-            df["Passo_Decimale"] = df["Passo medio"].apply(pace_to_float)
 
         return df.dropna(subset=["Data"])
 
@@ -70,11 +53,6 @@ def load_data():
         st.error(f"Errore caricamento dati: {e}")
         return pd.DataFrame()
 
-
-# ==========================================================
-# APP
-# ==========================================================
-st.title("🧪 Laboratorio IEV – Efficienza Reale")
 
 df = load_data()
 if df.empty:
@@ -89,20 +67,24 @@ st.sidebar.header("⚖️ Peso atleta")
 col1, col2 = st.sidebar.columns(2)
 
 with col1:
-    peso_start = st.number_input(
-        "Peso iniziale (kg)", 40.0, 120.0, 75.0, 0.1
-    )
-    data_start = st.date_input(
-        "Data peso iniziale", df["Data"].min().date()
-    )
+    peso_start = st.number_input("Peso iniziale (kg)", 40.0, 120.0, 75.0, 0.1)
+    data_start = st.date_input("Data peso iniziale", df["Data"].min().date())
 
 with col2:
-    peso_end = st.number_input(
-        "Peso finale (kg)", 40.0, 120.0, 72.0, 0.1
-    )
-    data_end = st.date_input(
-        "Data peso finale", df["Data"].max().date()
-    )
+    peso_end = st.number_input("Peso finale (kg)", 40.0, 120.0, 72.0, 0.1)
+    data_end = st.date_input("Data peso finale", df["Data"].max().date())
+
+# ==========================================================
+# FILTRO ATTIVITÀ NEL RANGE PESO
+# ==========================================================
+df = df[
+    (df["Data"] >= pd.to_datetime(data_start)) &
+    (df["Data"] <= pd.to_datetime(data_end))
+].copy()
+
+if df.empty:
+    st.warning("Nessuna attività nel periodo peso selezionato.")
+    st.stop()
 
 # ==========================================================
 # PESO INTERPOLATO
@@ -118,27 +100,37 @@ df["Peso"] = peso_start + (
 df["Peso"] = df["Peso"].clip(40, 120)
 
 # ==========================================================
-# FORMULA IEV (CORRETTA E NON PIATTA)
+# FORMULA IEV
 # ==========================================================
-"""
-IEV = ( Velocità_equivalente ) / ( FC * Peso )
-
-Velocità_equivalente = (Distanza + Dislivello/100) / Ore
-"""
-
 df = df.dropna(subset=[
-    "Distanza", "Ascesa totale", "Tempo_Ore",
-    "FC Media", "Peso"
+    "Distanza", "Ascesa totale",
+    "Tempo_Ore", "FC Media", "Peso"
 ])
 
 df["Vel_eq"] = (df["Distanza"] + df["Ascesa totale"] / 100) / df["Tempo_Ore"]
-
 df["IEV"] = df["Vel_eq"] / (df["FC Media"] * df["Peso"]) * 1000
+
+# ==========================================================
+# RIMOZIONE OUTLIER (IQR)
+# ==========================================================
+q1 = df["IEV"].quantile(0.25)
+q3 = df["IEV"].quantile(0.75)
+iqr = q3 - q1
+
+df = df[
+    (df["IEV"] >= q1 - 1.5 * iqr) &
+    (df["IEV"] <= q3 + 1.5 * iqr)
+]
+
+# ==========================================================
+# MEDIANA
+# ==========================================================
+iev_median = df["IEV"].median()
 
 # ==========================================================
 # GRAFICO
 # ==========================================================
-st.subheader("📈 Andamento Efficienza (IEV)")
+st.subheader("📈 Efficienza reale (IEV)")
 
 fig = go.Figure()
 
@@ -148,6 +140,13 @@ fig.add_trace(go.Scatter(
     mode="lines+markers",
     name="IEV",
     line=dict(width=3)
+))
+
+fig.add_trace(go.Scatter(
+    x=df["Data"],
+    y=[iev_median] * len(df),
+    name="Mediana IEV",
+    line=dict(dash="dash")
 ))
 
 fig.add_trace(go.Scatter(
@@ -173,11 +172,10 @@ fig.update_layout(
 st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================================
-# DEBUG TABLE
+# DEBUG
 # ==========================================================
-with st.expander("📋 Dati di calcolo"):
+with st.expander("📋 Dati filtrati"):
     st.dataframe(df[[
         "Data", "Distanza", "Ascesa totale",
-        "Tempo_Ore", "FC Media", "Peso",
-        "Vel_eq", "IEV"
+        "Tempo_Ore", "FC Media", "Peso", "IEV"
     ]])
