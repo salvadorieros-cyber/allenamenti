@@ -80,28 +80,25 @@ if not df_raw.empty:
         df = df_raw.copy() # In attesa che l'utente selezioni la seconda data
 
     if not df.empty:
-        # --- CALCOLI LAB ---
-        # IE Standard: Velocità / FC
-        df['IE_std'] = (1 / df['Passo_Decimale'].replace(0, 1)) / df['FC Media'] * 1000
+      # --- CALCOLI LAB AVANZATI ---
         
-        # IEV: (Km + (D+ / Fattore)) / (FC * Ore) * 100
-        df['IEV_test'] = ((df['Distanza'] + (df['Ascesa totale'] / peso_dislivello)) / 
-                          (df['FC Media'] * df['Tempo_Ore'])) * 100
+        # 1. Fattore Efficienza di Passo (Cadenza)
+        # Più la cadenza è vicina a quella ottimale (es. 170-180), più sei efficiente
+        if 'Cadenza media' in df.columns:
+             df['Efficienza_Cadenza'] = df['Cadenza media'] / 175 # Rapporto rispetto a cadenza target
+        else:
+             df['Efficienza_Cadenza'] = 1.0
 
-        # --- GRAFICO COMPARATIVO ---
-        st.subheader("Confronto Indici Filtrati")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['Data'], y=df['IE_std'], name="Eff. Velocità (Standard)", line=dict(color='cyan')))
-        fig.add_trace(go.Scatter(x=df['Data'], y=df['IEV_test'], name="Eff. Verticale (Test)", yaxis="y2", line=dict(color='orange', width=3)))
-        
-        fig.update_layout(
-            template="plotly_dark",
-            yaxis=dict(title="Indice Standard", titlefont=dict(color="cyan"), tickfont=dict(color="cyan")),
-            yaxis2=dict(title="Indice Verticale (IEV)", overlaying="y", side="right", titlefont=dict(color="orange"), tickfont=dict(color="orange")),
-            legend=dict(orientation="h", y=1.1),
-            hovermode="x unified"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        # 2. Rapporto di Intensità (FC Media vs FC Max se disponibile, altrimenti vs 180)
+        # Serve a capire quanto "motore" stai usando
+        df['Intensita_Relativa'] = df['FC Media'] / 180
+
+        # 3. FORMULA IEV PRO
+        # [ (Distanza_Km + (D+/Peso)) * Efficienza_Cadenza ] / (Intensità_Relativa * Tempo_Ore)
+        df['IEV_test'] = (
+            ((df['Distanza'] + (df['Ascesa totale'] / peso_dislivello)) * df['Efficienza_Cadenza']) / 
+            (df['Intensita_Relativa'] * df['Tempo_Ore'])
+        ) / 10 # Normalizziamo il valore finale
 
         # --- TABELLA DETTAGLI ---
         st.subheader("Analisi di dettaglio")
