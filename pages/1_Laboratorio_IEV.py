@@ -82,51 +82,65 @@ if not df_raw.empty:
     else:
         df = df_raw.copy()
 
-    if not df.empty:
-        # --- CALCOLI LAB AVANZATI (Con gestione errori) ---
-        
-        # 1. Efficienza Cadenza (ora protetta da errori di tipo)
+   if not df.empty:
+        # --- CALCOLI LAB AVANZATI ---
         df['Efficienza_Cadenza'] = df['Cadenza media'] / target_cadenza
-        
-        # 2. Intensità Relativa (FC Media / 180 o FC Max se disponibile)
         df['Intensita_Relativa'] = df['FC Media'] / 180
         
-        # 3. Indice Standard (per confronto)
-        df['IE_std'] = (1 / df['Passo_Decimale'].replace(0, 1)) / df['FC Media'] * 1000
-        
-        # 4. FORMULA IEV PRO
-        # Normalizzata: [(Km + D+/Peso) * Eff_Cadenza] / [Intensità * Ore]
+        # Formula IEV PRO
         df['IEV_test'] = (
             ((df['Distanza'] + (df['Ascesa totale'] / peso_dislivello)) * df['Efficienza_Cadenza']) / 
             (df['Intensita_Relativa'] * df['Tempo_Ore'])
         ) / 10
 
-        # --- GRAFICO ---
+        # --- CALCOLO TREND E MIGLIORAMENTO ---
+        df = df.sort_values('Data')
+        # Media mobile su 5 attività per pulire il grafico
+        df['IEV_Trend'] = df['IEV_test'].rolling(window=5, min_periods=1).mean()
+
+        # Calcolo % miglioramento ultimi 30 giorni
+        oggi = pd.Timestamp.now()
+        ultimi_30 = df[df['Data'] >= (oggi - pd.Timedelta(days=30))]['IEV_test'].mean()
+        precedenti_30 = df[(df['Data'] < (oggi - pd.Timedelta(days=30))) & 
+                           (df['Data'] >= (oggi - pd.Timedelta(days=60)))]['IEV_test'].mean()
+
+        # --- VISUALIZZAZIONE KPI ---
+        st.subheader("📈 Analisi del Miglioramento")
+        col_kpi1, col_kpi2 = st.columns(2)
+        
+        if pd.notna(ultimi_30) and pd.notna(precedenti_30) and precedenti_30 > 0:
+            diff = ((ultimi_30 - precedenti_30) / precedenti_30) * 100
+            col_kpi1.metric("Media IEV (Ultimi 30gg)", f"{ultimi_30:.2f}", f"{diff:.1f}% vs mese prec.")
+        else:
+            col_kpi1.metric("Media IEV (Ultimi 30gg)", f"{ultimi_30:.2f}" if pd.notna(ultimi_30) else "N/D")
+            col_kpi1.info("Dati insufficienti per il confronto mensile")
+
+        col_kpi2.metric("Miglior IEV nel periodo", f"{df['IEV_test'].max():.2f}")
+
+        # --- GRAFICO CON LINEA DI TENDENZA ---
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['Data'], y=df['IE_std'], name="Eff. Standard", line=dict(color='cyan', dash='dot')))
-        fig.add_trace(go.Scatter(x=df['Data'], y=df['IEV_test'], name="Eff. Verticale PRO", yaxis="y2", line=dict(color='orange', width=3)))
+        
+        # Punti reali (Scatter)
+        fig.add_trace(go.Scatter(
+            x=df['Data'], y=df['IEV_test'], 
+            mode='markers', name="IEV Singola Uscita",
+            marker=dict(color='orange', opacity=0.4)
+        ))
+        
+        # Linea di Trend (Media Mobile)
+        fig.add_trace(go.Scatter(
+            x=df['Data'], y=df['IEV_Trend'], 
+            name="Trend (Media Mobile)",
+            line=dict(color='red', width=4)
+        ))
         
         fig.update_layout(
             template="plotly_dark",
-            yaxis=dict(title="Standard"),
-            yaxis2=dict(title="Verticale PRO", overlaying="y", side="right"),
-            hovermode="x unified"
+            title="Evoluzione Efficienza Verticale",
+            yaxis=dict(title="Indice IEV PRO"),
+            hovermode="x unified",
+            legend=dict(orientation="h", y=1.1)
         )
         st.plotly_chart(fig, use_container_width=True)
-
-        # --- ANALISI TECNICA ---
-        st.subheader("🕵️ Analisi Biomeccanica")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.write("**Top 5 Allenamenti Efficienti (IEV)**")
-            st.dataframe(df.nlargest(5, 'IEV_test')[['Data', 'Distanza', 'Ascesa totale', 'Cadenza media', 'IEV_test']])
-        with c2:
-            st.write("**Relazione Cadenza/Pendenza**")
-            fig_cad = go.Figure(go.Scatter(x=df['Ascesa totale'], y=df['Cadenza media'], mode='markers', marker=dict(color='orange')))
-            fig_cad.update_layout(template="plotly_dark", xaxis_title="Dislivello (m)", yaxis_title="Cadenza (ppm)")
-            st.plotly_chart(fig_cad, use_container_width=True)
-            
-    else:
-        st.info("Filtra i dati per vedere i risultati.")
 else:
     st.error("Nessun dato trovato nel database.")
