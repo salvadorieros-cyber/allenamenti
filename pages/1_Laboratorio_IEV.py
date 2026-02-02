@@ -82,13 +82,20 @@ df_f = df.loc[mask].sort_values("Data").copy()
 # ==========================================
 # 3. CALCOLO INDICI EFFICIENZA
 # ==========================================
-df_f['FC_rel'] = df_f['FC Media'] / df_f['FC max']
-df_f['IE_std'] = (1 / df_f['Passo_Decimale'].replace(0,1)) / df_f['FC_rel']
-df_f['IEV'] = ((df_f['Distanza'] + df_f['Ascesa totale']/100) / (df_f['FC_rel'] * df_f['Tempo_Ore'])) * 100
-df_f['pendenza'] = df_f['Ascesa totale'] / (df_f['Distanza'] * 1000 + 0.01)
-df_f['fattore_pendenza'] = 1 + df_f['pendenza'] * 6
-df_f['Passo_eq'] = df_f['Passo_Decimale'] * df_f['fattore_pendenza']
-df_f['IE_GAP'] = (1 / df_f['Passo_eq']) / df_f['FC_rel']
+# 1. Velocità in m/s
+df_f['vel_ms'] = 1000 / df_f['Passo_Decimale'] / 60  # Passo min/km → velocità m/s
+
+# 2. Lavoro verticale in metri/minuto
+df_f['Lavoro_vert'] = df_f['Ascesa totale'] / df_f['Tempo_Minuti']  # m/min
+
+# 3. FC relativa
+df_f['FC_rel'] = df_f['FC Media'] / df_f['FC max']  # normalizzazione tra 0 e 1
+
+# 4. Indice Efficienza Verticale migliorato
+df_f['IEV_new'] = df_f['vel_ms'] / (df_f['FC_rel'] * (1 + df_f['Lavoro_vert']/10))
+
+# 5. (Opzionale) scala visibile per il grafico
+df_f['IEV_plot'] = df_f['IEV_new'] * 100
 
 # ==========================================
 # 4. VISUALIZZAZIONE
