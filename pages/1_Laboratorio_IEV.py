@@ -1,123 +1,169 @@
-# 1_Laboratorio_IEV.py
 import streamlit as st
-import sqlite3
 import pandas as pd
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Laboratorio Efficienza IEV", layout="wide")
+st.set_page_config(page_title="Laboratorio IEV", layout="wide")
 
-# ==========================================
-# 1. CARICAMENTO DATABASE
-# ==========================================
+st.title("🧪 Laboratorio Indice Efficienza Verticale (IEV)")
+
+# =====================================================
+# PARAMETRI PESO (MODIFICABILI PER TEST)
+# =====================================================
+peso_iniziale = 78.0   # kg all'inizio periodo
+peso_finale   = 74.5   # kg alla fine periodo
+peso_riferimento = 70  # kg di riferimento fisiologico
+
+# =====================================================
+# CARICAMENTO DATI
+# =====================================================
 @st.cache_data
 def load_data():
-    try:
-        conn = sqlite3.connect("Allenamenti.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        table = cursor.fetchone()
-        if not table:
-            return pd.DataFrame()
-        table_name = table[0]
+    return pd.read_csv("allenamenti.csv", parse_dates=["Data"])
 
-        df = pd.read_sql_query(f"SELECT * FROM '{table_name}'", conn)
-        conn.close()
+try:
+    df = load_data()
+except Exception as e:
+    st.error(f"Errore caricamento dati: {e}")
+    st.stop()
 
-        # Pulizia colonne numeriche
-        cols_num = ["Calorie", "FC Media", "FC max", "TE aerobico", "Cadenza media", "Distanza", "Ascesa totale"]
-        for col in cols_num:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col].replace(["--", "", None], pd.NA), errors="coerce")
-
-        # Data
-        if "Data" in df.columns:
-            df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
-        else:
-            return pd.DataFrame()
-
-        # Tempo in minuti e ore
-        if "Tempo" in df.columns:
-            df["Tempo_TD"] = pd.to_timedelta(df["Tempo"].astype(str), errors="coerce")
-            df["Tempo_Minuti"] = df["Tempo_TD"].dt.total_seconds() / 60
-            df["Tempo_Ore"] = df["Tempo_Minuti"] / 60
-
-        # Passo decimale
-        if "Passo medio" in df.columns:
-            def passo_a_decimale(p):
-                try:
-                    parts = str(p).split(":")
-                    if len(parts) == 2:
-                        return int(parts[0]) + int(parts[1])/60
-                    return None
-                except:
-                    return None
-            df["Passo_Decimale"] = df["Passo medio"].apply(passo_a_decimale)
-
-        return df.dropna(subset=["Data"])
-    except Exception as e:
-        st.error(f"Errore caricamento DB: {e}")
-        return pd.DataFrame()
-
-df = load_data()
 if df.empty:
-    st.warning("Database vuoto o non trovato")
+    st.warning("Database vuoto")
     st.stop()
 
-# ==========================================
-# 2. FILTRI BASE
-# ==========================================
-st.sidebar.header("Filtri")
-sport = st.sidebar.multiselect("Tipo Sport", sorted(df['Tipo di attivita'].dropna().unique()), default=df['Tipo di attivita'].dropna().unique())
-date_range = st.sidebar.date_input("Periodo", [df['Data'].min().date(), df['Data'].max().date()])
+# =====================================================
+# FILTRI DATA
+# =====================================================
+col1, col2 = st.columns(2)
 
-start_date = date_range[0]
-end_date = date_range[1] if len(date_range) > 1 else date_range[0]
-mask = (
-    (df['Tipo di attivita'].isin(sport)) &
-    (df['Data'].dt.date >= start_date) &
-    (df['Data'].dt.date <= end_date)
+with col1:
+    data_start = st.date_input(
+        "Data inizio",
+        df["Data"].min().date()
+    )
+
+with col2:
+    data_end = st.date_input(
+        "Data fine",
+        df["Data"].max().date()
+    )
+
+df_f = df[
+    (df["Data"] >= pd.to_datetime(data_start)) &
+    (df["Data"] <= pd.to_datetime(data_end))
+].copy()
+
+if df_f.empty:
+    st.warning("Nessun allenamento nel periodo selezionato")
+    st.stop()
+
+# =====================================================
+# PULIZIA DATI NUMERICI
+# =====================================================
+numeric_cols = [
+    "Passo_Decimale",
+    "FC Media",
+    "FC max",
+    "Ascesa totale",
+    "Tempo_Minuti"
+]
+
+for col in numeric_cols:
+    df_f[col] = pd.to_numeric(df_f[col], errors="coerce")
+
+df_f.dropna(subset=numeric_cols, inplace=True)
+
+# =====================================================
+# INTERPOLAZIONE PESO SU BASE TEMPORALE
+# =====================================================
+data_min = df_f["Data"].min()
+data_max = df_f["Data"].max()
+
+durata_giorni = max((data_max - data_min).days, 1)
+
+df_f["Peso_interp"] = peso_iniziale + (
+    (df_f["Data"] - data_min).dt.days / durata_giorni
+) * (peso_finale - peso_iniziale)
+
+df_f["fattore_peso"] = df_f["Peso_interp"] / peso_riferimento
+
+# =====================================================
+# CALCOLI IEV
+# =====================================================
+# Velocità m/s
+df_f["vel_ms"] = 1000 / df_f["Passo_Decimale"] / 60
+
+# Frequenza cardiaca relativa
+df_f["FC_rel"] = df_f["FC Media"] / df_f["FC max"]
+
+# Lavoro verticale (m/min)
+df_f["Lavoro_vert"] = df_f["Ascesa totale"] / df_f["Tempo_Minuti"]
+
+# IEV con peso
+df_f["IEV_peso"] = (
+    df_f["vel_ms"] /
+    (
+        df_f["FC_rel"] *
+        (1 + df_f["Lavoro_vert"] / 10) *
+        df_f["fattore_peso"]
+    )
 )
-df_f = df.loc[mask].sort_values("Data").copy()
 
-# ==========================================
-# 3. CALCOLO INDICI EFFICIENZA
-# ==========================================
-required_cols = ['Passo_Decimale','FC Media','FC max','Tempo_Minuti','Ascesa totale','Distanza']
+df_f["IEV_peso_plot"] = df_f["IEV_peso"] * 100
 
-if all(col in df_f.columns for col in required_cols):
-    # FC relativa
-    df_f['FC_rel'] = df_f['FC Media'] / df_f['FC max']
-
-    # IE Standard
-    df_f['IE_std'] = (1 / df_f['Passo_Decimale'].replace(0,1)) / df_f['FC_rel']
-
-    # Nuova Efficienza Verticale
-    df_f['vel_ms'] = 1000 / df_f['Passo_Decimale'] / 60
-    df_f['Lavoro_vert'] = df_f['Ascesa totale'] / df_f['Tempo_Minuti']  # m/min
-    df_f['IEV_new'] = df_f['vel_ms'] / (df_f['FC_rel'] * (1 + df_f['Lavoro_vert']/10))
-    df_f['IEV_plot'] = df_f['IEV_new'] * 100  # scala visibile grafico
-
-    # IE GAP con pendenza
-    df_f['pendenza'] = df_f['Ascesa totale'] / (df_f['Distanza']*1000 + 0.01)
-    df_f['fattore_pendenza'] = 1 + df_f['pendenza'] * 6
-    df_f['Passo_eq'] = df_f['Passo_Decimale'] * df_f['fattore_pendenza']
-    df_f['IE_GAP'] = (1 / df_f['Passo_eq']) / df_f['FC_rel']
-else:
-    st.warning("Colonne necessarie per calcolare gli indici non presenti nel DB.")
-    st.stop()
-
-# ==========================================
-# 4. VISUALIZZAZIONE
-# ==========================================
-st.title("💡 Laboratorio Indici Efficienza")
-
-st.subheader("Trend Indici di Efficienza")
+# =====================================================
+# GRAFICO
+# =====================================================
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IE_std'], name="IE Standard", line=dict(color="#636EFA")))
-fig.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IEV_plot'], name="IE Verticale", line=dict(color="#FFA15A")))
-fig.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IE_GAP'], name="IE GAP", line=dict(color="#00CCFF", dash="dot")))
-fig.update_layout(template="plotly_dark", xaxis_title="Data", yaxis_title="Indice Efficienza")
+
+fig.add_trace(
+    go.Scatter(
+        x=df_f["Data"],
+        y=df_f["IEV_peso_plot"],
+        mode="lines+markers",
+        name="IEV (con peso)",
+        line=dict(width=3)
+    )
+)
+
+fig.add_trace(
+    go.Scatter(
+        x=df_f["Data"],
+        y=df_f["Peso_interp"],
+        mode="lines",
+        name="Peso stimato (kg)",
+        yaxis="y2",
+        line=dict(dash="dot")
+    )
+)
+
+fig.update_layout(
+    title="Indice di Efficienza vs Peso nel tempo",
+    xaxis_title="Data",
+    yaxis=dict(title="IEV"),
+    yaxis2=dict(
+        title="Peso (kg)",
+        overlaying="y",
+        side="right"
+    ),
+    height=500
+)
+
 st.plotly_chart(fig, use_container_width=True)
 
-st.subheader("Tabella dati filtrati")
-st.dataframe(df_f[['Data','Tipo di attivita','Passo_Decimale','FC Media','FC max','IE_std','IEV_plot','IE_GAP']], use_container_width=True)
+# =====================================================
+# TABELLA DI CONTROLLO
+# =====================================================
+with st.expander("📊 Dati calcolati"):
+    st.dataframe(
+        df_f[
+            [
+                "Data",
+                "Passo_Decimale",
+                "FC Media",
+                "Ascesa totale",
+                "Peso_interp",
+                "IEV_peso_plot"
+            ]
+        ].sort_values("Data", ascending=False),
+        use_container_width=True
+    )
