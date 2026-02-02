@@ -1,185 +1,273 @@
 import streamlit as st
-import subprocess
-import sys
-
-# --- PROTEZIONE IMPORTAZIONE LIBRERIA ---
-try:
-    from google import genai
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "google-genai==0.3.0"])
-    from google import genai
-
 import sqlite3
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import timedelta
+import google.generativeai as genai
 
 # ==========================================
-# 1. CONFIGURAZIONE & COSTANTI
+# 1. CONFIGURAZIONE PAGINA
 # ==========================================
-st.set_page_config(page_title="Fitness AI Dashboard 2026", layout="wide")
-API_KEY = "AIzaSyBqTzfLFJOxtNaMs9DzVQfNFDLGWztzVVY"
+st.set_page_config(page_title="Fitness AI Dashboard", layout="wide")
 
 # ==========================================
-# 2. FUNZIONI CORE (DATI & AI)
+# 2. LOGICA DATI & UTILITY
 # ==========================================
 
 @st.cache_data
 def load_data():
     try:
         conn = sqlite3.connect('Allenamenti.db')
-        # Trova automaticamente la prima tabella disponibile
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = cursor.fetchall()
-        if not tables: return pd.DataFrame()
-        
-        df = pd.read_sql_query(f"SELECT * FROM '{tables[0][0]}'", conn)
+        if not tables:
+            return pd.DataFrame()
+            
+        table_name = tables[0][0]
+        df = pd.read_sql_query(f"SELECT * FROM '{table_name}'", conn)
         conn.close()
         
         # Pulizia Date
-        df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
-        
-        # Pulizia Numerica (gestione virgole e punti)
-        cols_num = ['Calorie', 'FC Media', 'FC max', 'TE aerobico', 'Distanza', 'Ascesa totale']
+        if 'Data' in df.columns:
+            df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+        else:
+            return pd.DataFrame()
+
+        # Conversione Numerica (gestione virgole e punti)
+        cols_num = ['Calorie', 'FC Media', 'FC max', 'TE aerobico', 'Cadenza media', 'Distanza', 'Ascesa totale']
         for col in cols_num:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
+                df[col] = pd.to_numeric(
+                    df[col].astype(str).str.replace('.', '').str.replace(',', '.'),
+                    errors='coerce'
+                )
         
-        # Normalizzazione Training Effect
+        # Correzione Training Effect
         if 'TE aerobico' in df.columns and df['TE aerobico'].mean() > 10:
             df['TE aerobico'] = df['TE aerobico'] / 10
 
-        # Calcolo Tempi
+        # Calcolo Minuti e Ore
         if 'Tempo' in df.columns:
             df['Tempo_TD'] = pd.to_timedelta(df['Tempo'].astype(str), errors='coerce')
             df['Tempo_Minuti'] = df['Tempo_TD'].dt.total_seconds() / 60
             df['Tempo_Ore'] = df['Tempo_Minuti'] / 60
         
-        # Conversione Passo (es. "5:30" -> 5.5)
+        # Conversione Passo
         if 'Passo medio' in df.columns:
-            def p_to_d(p):
+            def passo_a_decimale(p):
                 try:
                     parts = str(p).split(':')
-                    return int(parts[0]) + int(parts[1])/60 if len(parts)==2 else None
-                except: return None
-            df['Passo_Decimale'] = df['Passo medio'].apply(p_to_d)
+                    if len(parts) == 2:
+                        return int(parts[0]) + int(parts[1]) / 60
+                    return None
+                except:
+                    return None
+            df['Passo_Decimale'] = df['Passo medio'].apply(passo_a_decimale)
             
         return df.dropna(subset=['Data'])
     except Exception as e:
-        st.error(f"Errore nel caricamento del database: {e}")
+        st.error(f"Errore caricamento database: {e}")
         return pd.DataFrame()
 
-def chiedi_a_gemini(sintesi_testo):
+
+def assegna_zona_custom(fc, z1, z2, z3, z4):
+    if fc <= z1:
+        return "Z1 (Recupero)"
+    elif fc <= z2:
+        return "Z2 (Fondo)"
+    elif fc <= z3:
+        return "Z3 (Tempo)"
+    elif fc <= z4:
+        return "Z4 (Soglia)"
+    else:
+        return "Z5 (Massimale)"
+
+
+def chiedi_a_gemini(sintesi_dati: str) -> str:
     try:
-        client = genai.Client(api_key=API_KEY)
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=f"Sei un coach esperto. Commenta questi dati sulla variazione di efficienza e dai consigli pratici in italiano: {sintesi_testo}"
-        )
+        api_key = st.secrets["GEMINI_API_KEY"]
+        genai.configure(api_key=api_key)
+
+        prompt = f"""
+        Sei un coach sportivo esperto. Analizza questi dati che includono anche l'Efficienza Verticale (IEV):
+        {sintesi_dati}
+
+        Fornisci:
+        1. Stato di forma e trend di efficienza (velocità vs pendenza).
+        2. Bilanciamento delle zone cardio.
+        3. Consigli pratici per i prossimi allenamenti.
+        """
+
+        model = genai.GenerativeModel("gemini-pro")
+        response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"Il Coach è in pausa caffè (Errore: {e})"
+        return f"Errore AI: {e}"
+
 
 # ==========================================
-# 3. SICUREZZA & ACCESSO
+# 3. AUTENTICAZIONE
 # ==========================================
 if "password_correct" not in st.session_state:
     st.session_state.password_correct = False
 
 if not st.session_state.password_correct:
-    st.title("🔐 Fitness Dashboard")
-    pw = st.text_input("Inserisci la password per sbloccare i dati", type="password")
-    if st.button("Sblocca"):
+    st.title("🔐 Accesso Riservato")
+    pw = st.text_input("Inserisci Password", type="password")
+    if st.button("Sblocca Dashboard"):
         if pw == "elgnaro":
             st.session_state.password_correct = True
             st.rerun()
         else:
-            st.error("Accesso negato.")
+            st.error("Password errata")
 else:
     # ==========================================
-    # 4. DASHBOARD ATTIVA
+    # 4. DASHBOARD PRINCIPALE
     # ==========================================
     df = load_data()
 
     if df.empty:
-        st.info("Carica il file 'Allenamenti.db' nel repository per iniziare.")
+        st.warning("Database non trovato o vuoto.")
     else:
-        # --- CALCOLO INDICI ---
-        # 1. Efficienza Standard (Velocità / Battiti)
-        df['IE_std'] = (1 / df['Passo_Decimale'].replace(0,1)) / df['FC Media'] * 1000
+        # --- SIDEBAR: FILTRI (Invariati) ---
+        st.sidebar.header("🎯 Filtri Attività")
         
-        # 2. Efficienza Verticale (Compensata col Dislivello)
-        # Formula: (Km + (D+/100)) / (FC * Ore)
-        df['IEV'] = ((df['Distanza'] + (df['Ascesa totale']/100)) / (df['FC Media'] * df['Tempo_Ore'])) * 100
+        sport = st.sidebar.multiselect(
+            "Tipo Sport",
+            sorted(df['Tipo di attivita'].dropna().unique()),
+            default=df['Tipo di attivita'].dropna().unique()
+        )
 
-        # --- SIDEBAR FILTRI ---
-        st.sidebar.header("🎯 Filtra Allenamenti")
-        sport_list = sorted(df['Tipo di attivita'].unique())
-        sport = st.sidebar.multiselect("Tipo Sport", sport_list, default=sport_list)
+        date_min = df['Data'].min().date()
+        date_max = df['Data'].max().date()
+        date_range = st.sidebar.date_input("Periodo Temporale", [date_min, date_max])
         
-        df_f = df[df['Tipo di attivita'].isin(sport)].copy()
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("⚙️ Soglie Cardio (BPM)")
+        z1 = st.sidebar.number_input("Fine Z1 (Recupero)", value=130)
+        z2 = st.sidebar.number_input("Fine Z2 (Lento)", value=145)
+        z3 = st.sidebar.number_input("Fine Z3 (Medio)", value=160)
+        z4 = st.sidebar.number_input("Fine Z4 (Soglia)", value=175)
+        
+        zone_labels = ["Z1 (Recupero)", "Z2 (Fondo)", "Z3 (Tempo)", "Z4 (Soglia)", "Z5 (Massimale)"]
+        scelta_zone = st.sidebar.multiselect("Filtra per Zone", zone_labels, default=zone_labels)
 
-        # --- INTERFACCIA TABS ---
-        t1, t2, t3, t4 = st.tabs(["📊 Performance", "🏔️ Efficienza Verticale", "🤖 COACH AI", "📋 Tabella"])
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📊 Filtri Performance")
+        
+        def q_slider(label, col, key):
+            if col not in df.columns: return (0.0, 0.0)
+            val_min, val_max = float(df[col].min()), float(df[col].max())
+            if val_min == val_max: val_max = val_min + 1.0
+            return st.sidebar.slider(label, val_min, val_max, (val_min, val_max), key=key)
 
-        with t1:
-            st.subheader("Trend Efficienza Standard (Pianura)")
-            fig_std = px.scatter(df_f, x='Data', y='IE_std', color='Tipo di attivita', 
-                               trendline="ols", template="plotly_dark", title="Velocità relativa allo sforzo")
-            st.plotly_chart(fig_std, use_container_width=True)
+        f_cal = q_slider("🔥 Calorie", 'Calorie', "s_cal")
+        f_disl = q_slider("⛰️ Dislivello (m)", 'Ascesa totale', "s_disl")
+        f_te = q_slider("📈 TE Aerobico", 'TE aerobico', "s_te")
 
-        with t2:
-            st.subheader("Confronto: Quanto ti penalizza la salita?")
-            st.markdown("Il grafico confronta l'efficienza pura (blu) con quella corretta per il dislivello (arancio).")
+        # --- APPLICAZIONE FILTRI ---
+        df['Zona Cardio'] = df['FC Media'].apply(lambda x: assegna_zona_custom(x, z1, z2, z3, z4))
+        
+        start_date = date_range[0]
+        end_date = date_range[1] if len(date_range) > 1 else date_range[0]
+
+        mask = (
+            (df['Tipo di attivita'].isin(sport)) &
+            (df['Zona Cardio'].isin(scelta_zone)) &
+            (df['Data'].dt.date >= start_date) &
+            (df['Data'].dt.date <= end_date)
+        )
+
+        if 'Calorie' in df.columns: mask &= df['Calorie'].between(f_cal[0], f_cal[1])
+        if 'Ascesa totale' in df.columns: mask &= df['Ascesa totale'].between(f_disl[0], f_disl[1])
+        if 'TE aerobico' in df.columns: mask &= df['TE aerobico'].between(f_te[0], f_te[1])
+
+        df_f = df.loc[mask].sort_values(by='Data').copy()
+
+        # --- CALCOLO FORMULE (STANDARD + VERTICALE) ---
+        if 'Passo_Decimale' in df_f.columns and 'FC Media' in df_f.columns:
+            # 1. Efficienza Standard
+            df_f['IE_std'] = (1 / df_f['Passo_Decimale'].replace(0, 1)) / df_f['FC Media'] * 1000
             
-            fig_v = go.Figure()
-            fig_v.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IE_std'], name="Efficienza Standard", line=dict(color='#00d4ff')))
-            fig_v.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IEV'], name="Efficienza Verticale (IEV)", 
-                                     yaxis="y2", line=dict(color='#ff9100', width=3)))
+            # 2. Efficienza Verticale (IEV)
+            # Formula: (Distanza + Dislivello/100) / (FC * Ore) * 100
+            df_f['IEV'] = ((df_f['Distanza'] + (df_f['Ascesa totale'] / 100)) / 
+                          (df_f['FC Media'] * df_f['Tempo_Ore'])) * 100
+
+        # --- INTERFACCIA A TAB ---
+        tabs = st.tabs(["🚀 Trend", "🏔️ Efficienza Verticale", "📈 Performance", "🔥 Zone Cardio", "🤖 COACH AI", "📋 Lista Dati"])
+        
+        # TAB 0: TREND (Invariato)
+        with tabs[0]:
+            st.subheader("Relazione Passo vs Frequenza Cardiaca")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df_f['Data'], y=df_f['Passo_Decimale'], name="Passo", yaxis="y1", line=dict(color='#00CC96')))
+            fig.add_trace(go.Scatter(x=df_f['Data'], y=df_f['FC Media'], name="BPM Medi", yaxis="y2", line=dict(color='#EF553B', dash='dot')))
+            fig.update_layout(template="plotly_dark", yaxis=dict(title="Passo", autorange="reversed"), 
+                              yaxis2=dict(title="Battiti", side="right", overlaying="y", showgrid=False), legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig, use_container_width=True)
+
+        # TAB 1: EFFICIENZA VERTICALE (La nuova integrazione)
+        with tabs[1]:
+            st.subheader("Confronto Efficienza: Standard vs Verticale")
+            st.info("L'indice Verticale (Arancione) compensa la velocità con il dislivello accumulato.")
             
-            fig_v.update_layout(
+            fig_comp = go.Figure()
+            fig_comp.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IE_std'], name="Eff. Standard (Velocità)", line=dict(color='#636EFA')))
+            fig_comp.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IEV'], name="Eff. Verticale (Pendenza)", yaxis="y2", line=dict(color='#FFA15A', width=3)))
+            
+            fig_comp.update_layout(
                 template="plotly_dark",
-                yaxis=dict(title="Standard"),
-                yaxis2=dict(title="Verticale (IEV)", overlaying="y", side="right"),
+                yaxis=dict(title="Indice Standard", titlefont=dict(color="#636EFA"), tickfont=dict(color="#636EFA")),
+                yaxis2=dict(title="Indice Verticale (IEV)", titlefont=dict(color="#FFA15A"), tickfont=dict(color="#FFA15A"), 
+                            anchor="x", overlaying="y", side="right"),
                 legend=dict(orientation="h", y=1.1)
             )
-            st.plotly_chart(fig_v, use_container_width=True)
+            st.plotly_chart(fig_comp, use_container_width=True)
 
-        with t3:
-            st.header("🤖 Analisi Avanzata Coach AI")
+        # TAB 2: PERFORMANCE (Invariato)
+        with tabs[2]:
+            st.subheader("Training Effect vs Durata")
+            fig_te = px.scatter(df_f, x='Tempo_Minuti', y='TE aerobico', color='Tipo di attivita', size='Calorie', trendline="ols", template="plotly_dark")
+            st.plotly_chart(fig_te, use_container_width=True)
+
+        # TAB 3: ZONE CARDIO (Invariato)
+        with tabs[3]:
+            st.subheader("Distribuzione Passo per Zona Cardio")
+            fig_z = px.box(df_f, x='Zona Cardio', y='Passo_Decimale', color='Zona Cardio', category_orders={"Zona Cardio": zone_labels}, template="plotly_dark")
+            fig_z.update_yaxes(autorange="reversed")
+            st.plotly_chart(fig_z, use_container_width=True)
+
+        # TAB 4: COACH AI (Aggiornato con IEV)
+        with tabs[4]:
+            st.header("🤖 Coach AI")
+            data_taglio = df_f['Data'].max() - timedelta(days=30)
+            recenti = df_f[df_f['Data'] >= data_taglio]
+            storici = df_f[df_f['Data'] < data_taglio]
             
-            # Calcolo Variazione (Delta)
-            data_30 = df_f['Data'].max() - timedelta(days=30)
-            recenti = df_f[df_f['Data'] >= data_30]
-            storici = df_f[df_f['Data'] < data_30]
-            
-            if not recenti.empty and not storici.empty:
-                m_recente = recenti['IEV'].mean()
-                m_storica = storici['IEV'].mean()
-                delta = ((m_recente - m_storica) / m_storica) * 100
+            if not recenti.empty:
+                eff_r = recenti['IEV'].mean()
+                delta = ((eff_r - storici['IEV'].mean()) / storici['IEV'].mean() * 100) if not storici.empty else 0
                 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Indice IEV (30gg)", f"{m_recente:.2f}", f"{delta:.1f}% vs storico")
-                col2.metric("Allenamenti", len(recenti))
-                col3.metric("Km totali (30gg)", f"{recenti['Distanza'].sum():.1f}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("IEV Medio (30gg)", f"{eff_r:.2f}", f"{delta:.1f}% vs storico")
+                c2.metric("Allenamenti (30gg)", len(recenti))
+                c3.metric("Dislivello Totale", f"{int(recenti['Ascesa totale'].sum())} m")
 
-                if st.button("🚀 Genera Report Coach AI"):
+                if st.button("🚀 Genera Analisi"):
                     sintesi = {
-                        "Trend": "Miglioramento" if delta > 0 else "Calo",
-                        "Variazione": f"{delta:.1f}%",
-                        "IEV_Medio": round(m_recente, 2),
-                        "Sport": recenti['Tipo di attivita'].unique().tolist()
+                        "iev_medio_recente": round(eff_r, 2),
+                        "delta_percento": round(delta, 1),
+                        "ascesa_totale": recenti['Ascesa totale'].sum(),
+                        "zone": recenti['Zona Cardio'].value_counts().to_dict()
                     }
-                    with st.spinner("Analizzando i tuoi battiti..."):
-                        risposta = chiedi_a_gemini(str(sintesi))
-                        st.markdown("---")
-                        st.success("### 💬 Il verdetto del Coach")
-                        st.write(risposta)
-            else:
-                st.info("Servono almeno 30 giorni di storico per calcolare la variazione di performance.")
+                    with st.spinner("Analisi in corso..."):
+                        st.write(chiedi_a_gemini(str(sintesi)))
+            
+            st.plotly_chart(px.scatter(df_f, x='Data', y='IEV', trendline="ols", template="plotly_dark"), use_container_width=True)
 
-        with t4:
-            st.subheader("Dati Integrali")
-            st.dataframe(df_f.sort_values(by='Data', ascending=False), use_container_width=True)
+        # TAB 5: LISTA DATI
+        with tabs[5]:
+            st.dataframe(df_f, use_container_width=True)
