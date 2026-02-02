@@ -53,7 +53,7 @@ def load_data():
                     return None
             df["Passo_Decimale"] = df["Passo medio"].apply(passo_a_decimale)
 
-        return df.dropna(subset=["Data", "Passo_Decimale", "FC Media", "FC max"])
+        return df.dropna(subset=["Data"])
     except Exception as e:
         st.error(f"Errore caricamento DB: {e}")
         return pd.DataFrame()
@@ -82,20 +82,29 @@ df_f = df.loc[mask].sort_values("Data").copy()
 # ==========================================
 # 3. CALCOLO INDICI EFFICIENZA
 # ==========================================
-# 1. Velocità in m/s
-df_f['vel_ms'] = 1000 / df_f['Passo_Decimale'] / 60  # Passo min/km → velocità m/s
+required_cols = ['Passo_Decimale','FC Media','FC max','Tempo_Minuti','Ascesa totale','Distanza']
 
-# 2. Lavoro verticale in metri/minuto
-df_f['Lavoro_vert'] = df_f['Ascesa totale'] / df_f['Tempo_Minuti']  # m/min
+if all(col in df_f.columns for col in required_cols):
+    # FC relativa
+    df_f['FC_rel'] = df_f['FC Media'] / df_f['FC max']
 
-# 3. FC relativa
-df_f['FC_rel'] = df_f['FC Media'] / df_f['FC max']  # normalizzazione tra 0 e 1
+    # IE Standard
+    df_f['IE_std'] = (1 / df_f['Passo_Decimale'].replace(0,1)) / df_f['FC_rel']
 
-# 4. Indice Efficienza Verticale migliorato
-df_f['IEV_new'] = df_f['vel_ms'] / (df_f['FC_rel'] * (1 + df_f['Lavoro_vert']/10))
+    # Nuova Efficienza Verticale
+    df_f['vel_ms'] = 1000 / df_f['Passo_Decimale'] / 60
+    df_f['Lavoro_vert'] = df_f['Ascesa totale'] / df_f['Tempo_Minuti']  # m/min
+    df_f['IEV_new'] = df_f['vel_ms'] / (df_f['FC_rel'] * (1 + df_f['Lavoro_vert']/10))
+    df_f['IEV_plot'] = df_f['IEV_new'] * 100  # scala visibile grafico
 
-# 5. (Opzionale) scala visibile per il grafico
-df_f['IEV_plot'] = df_f['IEV_new'] * 100
+    # IE GAP con pendenza
+    df_f['pendenza'] = df_f['Ascesa totale'] / (df_f['Distanza']*1000 + 0.01)
+    df_f['fattore_pendenza'] = 1 + df_f['pendenza'] * 6
+    df_f['Passo_eq'] = df_f['Passo_Decimale'] * df_f['fattore_pendenza']
+    df_f['IE_GAP'] = (1 / df_f['Passo_eq']) / df_f['FC_rel']
+else:
+    st.warning("Colonne necessarie per calcolare gli indici non presenti nel DB.")
+    st.stop()
 
 # ==========================================
 # 4. VISUALIZZAZIONE
@@ -105,10 +114,10 @@ st.title("💡 Laboratorio Indici Efficienza")
 st.subheader("Trend Indici di Efficienza")
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IE_std'], name="IE Standard", line=dict(color="#636EFA")))
-fig.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IEV'], name="IE Verticale", line=dict(color="#FFA15A")))
+fig.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IEV_plot'], name="IE Verticale", line=dict(color="#FFA15A")))
 fig.add_trace(go.Scatter(x=df_f['Data'], y=df_f['IE_GAP'], name="IE GAP", line=dict(color="#00CCFF", dash="dot")))
 fig.update_layout(template="plotly_dark", xaxis_title="Data", yaxis_title="Indice Efficienza")
 st.plotly_chart(fig, use_container_width=True)
 
 st.subheader("Tabella dati filtrati")
-st.dataframe(df_f[['Data','Tipo di attivita','Passo_Decimale','FC Media','FC max','IE_std','IEV','IE_GAP']], use_container_width=True)
+st.dataframe(df_f[['Data','Tipo di attivita','Passo_Decimale','FC Media','FC max','IE_std','IEV_plot','IE_GAP']], use_container_width=True)
