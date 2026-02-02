@@ -1,169 +1,130 @@
 import streamlit as st
+import sqlite3
 import pandas as pd
 import plotly.graph_objects as go
+from pathlib import Path
+from datetime import datetime
 
 st.set_page_config(page_title="Laboratorio IEV", layout="wide")
 
-st.title("🧪 Laboratorio Indice Efficienza Verticale (IEV)")
+st.title("🧪 Laboratorio IEV – Efficienza con Peso")
 
-# =====================================================
-# PARAMETRI PESO (MODIFICABILI PER TEST)
-# =====================================================
-peso_iniziale = 78.0   # kg all'inizio periodo
-peso_finale   = 74.5   # kg alla fine periodo
-peso_riferimento = 70  # kg di riferimento fisiologico
-
-# =====================================================
-# CARICAMENTO DATI
-# =====================================================
+# ======================================================
+# 1. LETTURA DATABASE (MULTIPAGE SAFE)
+# ======================================================
 @st.cache_data
 def load_data():
-    return pd.read_csv("allenamenti.csv", parse_dates=["Data"])
+    try:
+        base_path = Path(__file__).resolve().parent.parent
+        db_path = base_path / "allenamenti.db"
 
-try:
-    df = load_data()
-except Exception as e:
-    st.error(f"Errore caricamento dati: {e}")
-    st.stop()
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        table_name = cursor.fetchone()[0]
+
+        df = pd.read_sql(f"SELECT * FROM '{table_name}'", conn)
+        conn.close()
+
+        df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
+
+        # Pulizia numerica
+        num_cols = ["FC Media", "FC max", "Distanza", "Ascesa totale"]
+        for c in num_cols:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        # Tempo
+        df["Tempo_TD"] = pd.to_timedelta(df["Tempo"], errors="coerce")
+        df["Tempo_min"] = df["Tempo_TD"].dt.total_seconds() / 60
+
+        # Passo mm:ss → decimale
+        def passo_to_dec(p):
+            try:
+                m, s = str(p).split(":")
+                return int(m) + int(s) / 60
+            except:
+                return None
+
+        df["Passo_dec"] = df["Passo medio"].apply(passo_to_dec)
+
+        return df.dropna(subset=["Data", "Passo_dec", "FC Media", "Tempo_min"])
+
+    except Exception as e:
+        st.error(f"Errore caricamento dati: {e}")
+        return pd.DataFrame()
+
+df = load_data()
 
 if df.empty:
-    st.warning("Database vuoto")
     st.stop()
 
-# =====================================================
-# FILTRI DATA
-# =====================================================
-col1, col2 = st.columns(2)
+# ======================================================
+# 2. INPUT PESO (INTERPOLAZIONE)
+# ======================================================
+st.sidebar.header("⚖️ Peso Atleta")
 
-with col1:
-    data_start = st.date_input(
-        "Data inizio",
-        df["Data"].min().date()
-    )
+peso_start = st.sidebar.number_input("Peso iniziale (kg)", value=75.0)
+data_start = st.sidebar.date_input("Data peso iniziale", df["Data"].min())
 
-with col2:
-    data_end = st.date_input(
-        "Data fine",
-        df["Data"].max().date()
-    )
+peso_end = st.sidebar.number_input("Peso finale (kg)", value=72.0)
+data_end = st.sidebar.date_input("Data peso finale", df["Data"].max())
 
-df_f = df[
-    (df["Data"] >= pd.to_datetime(data_start)) &
-    (df["Data"] <= pd.to_datetime(data_end))
-].copy()
+# interpolazione lineare peso nel tempo
+df["peso"] = peso_start + (
+    (df["Data"] - pd.to_datetime(data_start)).dt.days /
+    max((pd.to_datetime(data_end) - pd.to_datetime(data_start)).days, 1)
+) * (peso_end - peso_start)
 
-if df_f.empty:
-    st.warning("Nessun allenamento nel periodo selezionato")
-    st.stop()
+df["peso"] = df["peso"].clip(lower=40, upper=120)
 
-# =====================================================
-# PULIZIA DATI NUMERICI
-# =====================================================
-numeric_cols = [
-    "Passo_Decimale",
-    "FC Media",
-    "FC max",
-    "Ascesa totale",
-    "Tempo_Minuti"
-]
+# ======================================================
+# 3. FORMULA IEV CON PESO (NUOVA)
+# ======================================================
+"""
+IEV_peso =
+    velocità (m/s)
+    -------------------------
+    FC_relativa × peso × carico verticale
+"""
 
-for col in numeric_cols:
-    df_f[col] = pd.to_numeric(df_f[col], errors="coerce")
+df["vel_ms"] = 1000 / (df["Passo_dec"] * 60)
+df["FC_rel"] = df["FC Media"] / df["FC max"]
+df["carico_vert"] = 1 + (df["Ascesa totale"] / df["Tempo_min"]) / 10
 
-df_f.dropna(subset=numeric_cols, inplace=True)
+df["IEV_peso"] = df["vel_ms"] / (df["FC_rel"] * df["peso"] * df["carico_vert"])
+df["IEV_plot"] = df["IEV_peso"] * 1000  # scala visiva
 
-# =====================================================
-# INTERPOLAZIONE PESO SU BASE TEMPORALE
-# =====================================================
-data_min = df_f["Data"].min()
-data_max = df_f["Data"].max()
+# ======================================================
+# 4. GRAFICO
+# ======================================================
+st.subheader("📈 Andamento IEV (normalizzato per Peso)")
 
-durata_giorni = max((data_max - data_min).days, 1)
-
-df_f["Peso_interp"] = peso_iniziale + (
-    (df_f["Data"] - data_min).dt.days / durata_giorni
-) * (peso_finale - peso_iniziale)
-
-df_f["fattore_peso"] = df_f["Peso_interp"] / peso_riferimento
-
-# =====================================================
-# CALCOLI IEV
-# =====================================================
-# Velocità m/s
-df_f["vel_ms"] = 1000 / df_f["Passo_Decimale"] / 60
-
-# Frequenza cardiaca relativa
-df_f["FC_rel"] = df_f["FC Media"] / df_f["FC max"]
-
-# Lavoro verticale (m/min)
-df_f["Lavoro_vert"] = df_f["Ascesa totale"] / df_f["Tempo_Minuti"]
-
-# IEV con peso
-df_f["IEV_peso"] = (
-    df_f["vel_ms"] /
-    (
-        df_f["FC_rel"] *
-        (1 + df_f["Lavoro_vert"] / 10) *
-        df_f["fattore_peso"]
-    )
-)
-
-df_f["IEV_peso_plot"] = df_f["IEV_peso"] * 100
-
-# =====================================================
-# GRAFICO
-# =====================================================
 fig = go.Figure()
-
-fig.add_trace(
-    go.Scatter(
-        x=df_f["Data"],
-        y=df_f["IEV_peso_plot"],
-        mode="lines+markers",
-        name="IEV (con peso)",
-        line=dict(width=3)
-    )
-)
-
-fig.add_trace(
-    go.Scatter(
-        x=df_f["Data"],
-        y=df_f["Peso_interp"],
-        mode="lines",
-        name="Peso stimato (kg)",
-        yaxis="y2",
-        line=dict(dash="dot")
-    )
-)
+fig.add_trace(go.Scatter(
+    x=df["Data"],
+    y=df["IEV_plot"],
+    mode="lines+markers",
+    name="IEV peso"
+))
 
 fig.update_layout(
-    title="Indice di Efficienza vs Peso nel tempo",
-    xaxis_title="Data",
-    yaxis=dict(title="IEV"),
-    yaxis2=dict(
-        title="Peso (kg)",
-        overlaying="y",
-        side="right"
-    ),
-    height=500
+    template="plotly_dark",
+    yaxis_title="Indice Efficienza (peso-normalizzato)",
+    xaxis_title="Data"
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
-# =====================================================
-# TABELLA DI CONTROLLO
-# =====================================================
-with st.expander("📊 Dati calcolati"):
+# ======================================================
+# 5. DEBUG VISIVO
+# ======================================================
+with st.expander("🔍 Dettaglio calcolo"):
     st.dataframe(
-        df_f[
-            [
-                "Data",
-                "Passo_Decimale",
-                "FC Media",
-                "Ascesa totale",
-                "Peso_interp",
-                "IEV_peso_plot"
-            ]
-        ].sort_values("Data", ascending=False),
+        df[[
+            "Data", "Passo_dec", "FC Media", "peso",
+            "vel_ms", "FC_rel", "carico_vert", "IEV_plot"
+        ]].sort_values("Data"),
         use_container_width=True
     )
