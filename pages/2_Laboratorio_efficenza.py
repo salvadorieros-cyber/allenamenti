@@ -105,7 +105,7 @@ def load_data():
                 df[col] = df[col].apply(clean_number)
 
         # 🔥 CORREZIONE DEFINITIVA: distanza in decametri → km
-        df["Distanza"] = df["Distanza"] / 100
+        df["Distanza"] = df["Distanza"] /100
 
         # Tempo
         if "Tempo" in df.columns:
