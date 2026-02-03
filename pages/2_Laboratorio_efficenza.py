@@ -11,21 +11,15 @@ from sklearn.linear_model import LinearRegression
 # ==========================================================
 st.set_page_config(page_title="Laboratorio Efficienza", layout="wide")
 st.title("🧪 Laboratorio Efficienza – Analisi dei Progressi nel Tempo")
+
+# ==========================================================
+# TOGGLE SPIEGAZIONE
+# ==========================================================
 with st.expander("📘 Mostra spiegazione dei grafici e delle formule"):
     st.markdown("""
     ## 📘 Come leggere i grafici – Formule e significato
 
-    Questa pagina analizza la tua efficienza di corsa nel tempo usando quattro indicatori chiave.
-    Ogni metrica è costruita per isolare un aspetto diverso della performance.
-
-    ---
-
     ### 🟦 1) Efficienza FC (solo pianura)
-    Misura **quanto vai veloce per ogni battito cardiaco**.  
-    È un indicatore diretto dell’efficienza aerobica.
-
-    Formula:
-
     \
 
 \[
@@ -34,53 +28,19 @@ with st.expander("📘 Mostra spiegazione dei grafici e delle formule"):
 
 
 
-    Calcolata **solo per dislivello ≤ 50 m** per evitare distorsioni.
+    ### 🟩 2) Passo vs FC
+    Relazione tra FC e passo (min/km).
 
-    Interpretazione:
-    - aumenta → stai diventando più efficiente  
-    - diminuisce → stesso sforzo, meno velocità  
-
-    ---
-
-    ### 🟩 2) Passo vs FC (efficienza aerobica)
-    Relazione tra:
-
-    - **X:** FC media  
-    - **Y:** passo (min/km)  
-
-    La regressione mostra come cambia il passo al variare della FC.
-
-    Interpretazione:
-    - la curva scende nel tempo → miglioramento aerobico  
-    - la curva sale → peggioramento o fatica residua  
-
-    ---
-
-    ### 🟧 3) Velocità Equivalente (per trail)
-    Serve per confrontare allenamenti con dislivello diverso.  
-    Aggiunge 1 km ogni 100 m di salita.
-
-    Formula:
-
+    ### 🟧 3) Velocità Equivalente (trail)
     \
 
 \[
-    Vel_{eq} = \\frac{Distanza_{km} + \\frac{Dislivello_{m}}{100}}{Tempo_{ore}}
+    Vel_{eq} = \\frac{Distanza_{km} + Dislivello/100}{Tempo_{ore}}
     \\]
 
 
 
-    Interpretazione:
-    - aumenta → miglioramento in salita  
-    - diminuisce → affaticamento o percorso impegnativo  
-
-    ---
-
-    ### 🟥 4) Efficienza Metabolica (TE / Tempo)
-    Misura **quanto Training Effect produci per minuto**.
-
-    Formula:
-
+    ### 🟥 4) Efficienza Metabolica
     \
 
 \[
@@ -89,30 +49,43 @@ with st.expander("📘 Mostra spiegazione dei grafici e delle formule"):
 
 
 
-    Interpretazione:
-    - alto → allenamento molto efficace  
-    - basso → stimolo ridotto  
-
-    ---
-
-    ### 📈 Trendline (Regressione Lineare)
-    Usata per mostrare l’evoluzione nel tempo.
-
+    ### 📈 Trendline
     \
 
 \[
-    Trend(t) = a \\cdot t + b
+    Trend(t) = a t + b
     \\]
 
 
-
-    Interpretazione:
-    - **a > 0** → miglioramento  
-    - **a < 0** → peggioramento  
-    - **a = 0** → stabilità  
-
-    ---
     """)
+
+# ==========================================================
+# FUNZIONE PULIZIA NUMERI
+# ==========================================================
+def clean_number(x):
+    if pd.isna(x):
+        return np.nan
+    x = str(x).strip()
+
+    # Rimuove simboli strani
+    x = x.replace(" ", "").replace("'", "").replace("–", "").replace("—", "")
+
+    # Formato italiano "1.234,56"
+    if "," in x and "." in x and x.rfind(",") > x.rfind("."):
+        x = x.replace(".", "").replace(",", ".")
+
+    # Formato "1.234" (migliaia)
+    elif "." in x and x.count(".") == 1 and not x.split(".")[1].isdigit():
+        x = x.replace(".", "")
+
+    # Formato "12,34"
+    elif "," in x:
+        x = x.replace(",", ".")
+
+    try:
+        return float(x)
+    except:
+        return np.nan
 
 # ==========================================================
 # LOAD DATA
@@ -130,20 +103,12 @@ def load_data():
         df = pd.read_sql_query(f"SELECT * FROM '{table[0]}'", conn)
         conn.close()
 
-        # Date
         df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
 
-        # Conversioni numeriche
         numeric_cols = ["FC Media", "Distanza", "Ascesa totale", "Calorie", "TE aerobico"]
         for col in numeric_cols:
             if col in df.columns:
-                df[col] = (
-                    df[col]
-                    .astype(str)
-                    .str.replace(".", "", regex=False)
-                    .str.replace(",", ".", regex=False)
-                )
-                df[col] = pd.to_numeric(df[col], errors="coerce")
+                df[col] = df[col].apply(clean_number)
 
         # Tempo
         if "Tempo" in df.columns:
@@ -166,7 +131,6 @@ def load_data():
     except Exception as e:
         st.error(f"Errore caricamento dati: {e}")
         return pd.DataFrame()
-
 
 df = load_data()
 if df.empty:
@@ -200,36 +164,26 @@ if df.empty:
     st.stop()
 
 # ==========================================================
-# CALCOLO METRICHE DI EFFICIENZA
+# CALCOLO METRICHE
 # ==========================================================
-
-# Velocità km/h
 df["Velocità_kmh"] = df["Distanza"] / df["Tempo_Ore"]
-
-# Velocità equivalente (per trail)
 df["Vel_eq"] = (df["Distanza"] + df["Ascesa totale"] / 100) / df["Tempo_Ore"]
-
-# Efficienza metabolica
 df["Eff_TE"] = df["TE aerobico"] / df["Tempo_Minuti"]
 
 # ==========================================================
-# FUNZIONE TRENDLINE SICURA
+# TRENDLINE SICURA
 # ==========================================================
 def safe_trendline(x, y):
     x = np.array(x)
     y = np.array(y)
-
     mask = (~np.isnan(x)) & (~np.isnan(y)) & (~np.isinf(y))
     x = x[mask]
     y = y[mask]
-
     if len(x) < 2:
         return None
-
-    X = x.reshape(-1, 1)
     model = LinearRegression()
-    model.fit(X, y)
-    return model.predict(X)
+    model.fit(x.reshape(-1, 1), y)
+    return model.predict(x.reshape(-1, 1))
 
 # ==========================================================
 # GRAFICO 1 – Efficienza FC (solo pianura)
@@ -247,21 +201,12 @@ else:
     trend = safe_trendline(x_days, df_eff["Eff_FC"].values)
 
     fig1 = go.Figure()
-    fig1.add_trace(go.Scatter(
-        x=df_eff["Data"],
-        y=df_eff["Eff_FC"],
-        mode="markers+lines",
-        name="Efficienza FC",
-        line=dict(width=2)
-    ))
+    fig1.add_trace(go.Scatter(x=df_eff["Data"], y=df_eff["Eff_FC"],
+                              mode="markers+lines", name="Efficienza FC"))
 
     if trend is not None:
-        fig1.add_trace(go.Scatter(
-            x=df_eff["Data"],
-            y=trend,
-            name="Trend",
-            line=dict(color="yellow", dash="dash", width=3)
-        ))
+        fig1.add_trace(go.Scatter(x=df_eff["Data"], y=trend,
+                                  name="Trend", line=dict(color="yellow", dash="dash")))
 
     fig1.update_layout(template="plotly_dark")
     st.plotly_chart(fig1, width="stretch")
@@ -271,14 +216,8 @@ else:
 # ==========================================================
 st.subheader("💓 Efficienza Aerobica (Passo vs FC)")
 
-fig2 = px.scatter(
-    df,
-    x="FC Media",
-    y="Passo_Decimale",
-    color="Data",
-    trendline="ols",
-    template="plotly_dark"
-)
+fig2 = px.scatter(df, x="FC Media", y="Passo_Decimale",
+                  color="Data", trendline="ols", template="plotly_dark")
 fig2.update_yaxes(autorange="reversed")
 st.plotly_chart(fig2, width="stretch")
 
@@ -291,20 +230,12 @@ x_days = (df["Data"] - df["Data"].min()).dt.days.values
 trend_vel = safe_trendline(x_days, df["Vel_eq"].values)
 
 fig3 = go.Figure()
-fig3.add_trace(go.Scatter(
-    x=df["Data"],
-    y=df["Vel_eq"],
-    mode="markers+lines",
-    name="Vel_eq"
-))
+fig3.add_trace(go.Scatter(x=df["Data"], y=df["Vel_eq"],
+                          mode="markers+lines", name="Vel_eq"))
 
 if trend_vel is not None:
-    fig3.add_trace(go.Scatter(
-        x=df["Data"],
-        y=trend_vel,
-        name="Trend",
-        line=dict(color="orange", dash="dash")
-    ))
+    fig3.add_trace(go.Scatter(x=df["Data"], y=trend_vel,
+                              name="Trend", line=dict(color="orange", dash="dash")))
 
 fig3.update_layout(template="plotly_dark")
 st.plotly_chart(fig3, width="stretch")
@@ -317,20 +248,12 @@ st.subheader("🔥 Efficienza Metabolica (TE / Tempo)")
 trend_te = safe_trendline(x_days, df["Eff_TE"].values)
 
 fig4 = go.Figure()
-fig4.add_trace(go.Scatter(
-    x=df["Data"],
-    y=df["Eff_TE"],
-    mode="markers+lines",
-    name="Efficienza TE"
-))
+fig4.add_trace(go.Scatter(x=df["Data"], y=df["Eff_TE"],
+                          mode="markers+lines", name="Efficienza TE"))
 
 if trend_te is not None:
-    fig4.add_trace(go.Scatter(
-        x=df["Data"],
-        y=trend_te,
-        name="Trend",
-        line=dict(color="green", dash="dash")
-    ))
+    fig4.add_trace(go.Scatter(x=df["Data"], y=trend_te,
+                              name="Trend", line=dict(color="green", dash="dash")))
 
 fig4.update_layout(template="plotly_dark")
 st.plotly_chart(fig4, width="stretch")
