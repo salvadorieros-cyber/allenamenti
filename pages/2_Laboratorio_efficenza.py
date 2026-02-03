@@ -67,18 +67,12 @@ def clean_number(x):
         return np.nan
     x = str(x).strip()
 
-    # Rimuove simboli strani
     x = x.replace(" ", "").replace("'", "").replace("–", "").replace("—", "")
 
-    # Formato italiano "1.234,56"
     if "," in x and "." in x and x.rfind(",") > x.rfind("."):
         x = x.replace(".", "").replace(",", ".")
-
-    # Formato "1.234" (migliaia)
     elif "." in x and x.count(".") == 1 and not x.split(".")[1].isdigit():
         x = x.replace(".", "")
-
-    # Formato "12,34"
     elif "," in x:
         x = x.replace(",", ".")
 
@@ -109,6 +103,9 @@ def load_data():
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = df[col].apply(clean_number)
+
+        # 🔥 CORREZIONE DEFINITIVA: distanza in decametri → km
+        df["Distanza"] = df["Distanza"] / 100
 
         # Tempo
         if "Tempo" in df.columns:
