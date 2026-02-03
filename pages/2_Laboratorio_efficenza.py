@@ -11,6 +11,108 @@ from sklearn.linear_model import LinearRegression
 # ==========================================================
 st.set_page_config(page_title="Laboratorio Efficienza", layout="wide")
 st.title("🧪 Laboratorio Efficienza – Analisi dei Progressi nel Tempo")
+with st.expander("📘 Mostra spiegazione dei grafici e delle formule"):
+    st.markdown("""
+    ## 📘 Come leggere i grafici – Formule e significato
+
+    Questa pagina analizza la tua efficienza di corsa nel tempo usando quattro indicatori chiave.
+    Ogni metrica è costruita per isolare un aspetto diverso della performance.
+
+    ---
+
+    ### 🟦 1) Efficienza FC (solo pianura)
+    Misura **quanto vai veloce per ogni battito cardiaco**.  
+    È un indicatore diretto dell’efficienza aerobica.
+
+    Formula:
+
+    \
+
+\[
+    Eff_{FC} = \\frac{Velocità_{km/h}}{FC_{media}}
+    \\]
+
+
+
+    Calcolata **solo per dislivello ≤ 50 m** per evitare distorsioni.
+
+    Interpretazione:
+    - aumenta → stai diventando più efficiente  
+    - diminuisce → stesso sforzo, meno velocità  
+
+    ---
+
+    ### 🟩 2) Passo vs FC (efficienza aerobica)
+    Relazione tra:
+
+    - **X:** FC media  
+    - **Y:** passo (min/km)  
+
+    La regressione mostra come cambia il passo al variare della FC.
+
+    Interpretazione:
+    - la curva scende nel tempo → miglioramento aerobico  
+    - la curva sale → peggioramento o fatica residua  
+
+    ---
+
+    ### 🟧 3) Velocità Equivalente (per trail)
+    Serve per confrontare allenamenti con dislivello diverso.  
+    Aggiunge 1 km ogni 100 m di salita.
+
+    Formula:
+
+    \
+
+\[
+    Vel_{eq} = \\frac{Distanza_{km} + \\frac{Dislivello_{m}}{100}}{Tempo_{ore}}
+    \\]
+
+
+
+    Interpretazione:
+    - aumenta → miglioramento in salita  
+    - diminuisce → affaticamento o percorso impegnativo  
+
+    ---
+
+    ### 🟥 4) Efficienza Metabolica (TE / Tempo)
+    Misura **quanto Training Effect produci per minuto**.
+
+    Formula:
+
+    \
+
+\[
+    Eff_{TE} = \\frac{TE}{Tempo_{minuti}}
+    \\]
+
+
+
+    Interpretazione:
+    - alto → allenamento molto efficace  
+    - basso → stimolo ridotto  
+
+    ---
+
+    ### 📈 Trendline (Regressione Lineare)
+    Usata per mostrare l’evoluzione nel tempo.
+
+    \
+
+\[
+    Trend(t) = a \\cdot t + b
+    \\]
+
+
+
+    Interpretazione:
+    - **a > 0** → miglioramento  
+    - **a < 0** → peggioramento  
+    - **a = 0** → stabilità  
+
+    ---
+    """)
 
 # ==========================================================
 # LOAD DATA
