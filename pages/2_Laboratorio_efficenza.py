@@ -104,9 +104,6 @@ if df.empty:
 # Velocità km/h
 df["Velocità_kmh"] = df["Distanza"] / df["Tempo_Ore"]
 
-# Efficienza FC → velocità / FC
-df["Eff_FC"] = df["Velocità_kmh"] / df["FC Media"]
-
 # Velocità equivalente (per trail)
 df["Vel_eq"] = (df["Distanza"] + df["Ascesa totale"] / 100) / df["Tempo_Ore"]
 
@@ -120,13 +117,12 @@ def safe_trendline(x, y):
     x = np.array(x)
     y = np.array(y)
 
-    # Rimuove NaN e inf
-    mask = (~np.isnan(x)) & (~np.isnan(y)) & (~np.isinf(x)) & (~np.isinf(y))
+    mask = (~np.isnan(x)) & (~np.isnan(y)) & (~np.isinf(y))
     x = x[mask]
     y = y[mask]
 
     if len(x) < 2:
-        return None  # impossibile calcolare trend
+        return None
 
     X = x.reshape(-1, 1)
     model = LinearRegression()
@@ -134,24 +130,42 @@ def safe_trendline(x, y):
     return model.predict(X)
 
 # ==========================================================
-# GRAFICO 1 – Efficienza FC nel tempo
+# GRAFICO 1 – Efficienza FC (solo pianura)
 # ==========================================================
-st.subheader("📈 Efficienza FC (Velocità / FC)")
+st.subheader("📈 Efficienza FC (solo corse pianeggianti, dislivello ≤ 50 m)")
 
-x_days = (df["Data"] - df["Data"].min()).dt.days
-trend = safe_trendline(x_days, df["Eff_FC"])
+df_eff = df[df["Ascesa totale"] <= 50].copy()
 
-fig1 = go.Figure()
-fig1.add_trace(go.Scatter(x=df["Data"], y=df["Eff_FC"], mode="markers+lines", name="Efficienza FC"))
+if df_eff.empty or len(df_eff) < 2:
+    st.info("Dati insufficienti per calcolare l'efficienza FC su percorsi pianeggianti.")
+else:
+    df_eff["Eff_FC"] = df_eff["Velocità_kmh"] / df_eff["FC Media"]
 
-if trend is not None:
-    fig1.add_trace(go.Scatter(x=df["Data"], y=trend, name="Trend", line=dict(color="yellow", dash="dash")))
+    x_days = (df_eff["Data"] - df_eff["Data"].min()).dt.days.values
+    trend = safe_trendline(x_days, df_eff["Eff_FC"].values)
 
-fig1.update_layout(template="plotly_dark")
-st.plotly_chart(fig1, width="stretch")
+    fig1 = go.Figure()
+    fig1.add_trace(go.Scatter(
+        x=df_eff["Data"],
+        y=df_eff["Eff_FC"],
+        mode="markers+lines",
+        name="Efficienza FC",
+        line=dict(width=2)
+    ))
+
+    if trend is not None:
+        fig1.add_trace(go.Scatter(
+            x=df_eff["Data"],
+            y=trend,
+            name="Trend",
+            line=dict(color="yellow", dash="dash", width=3)
+        ))
+
+    fig1.update_layout(template="plotly_dark")
+    st.plotly_chart(fig1, width="stretch")
 
 # ==========================================================
-# GRAFICO 2 – Passo vs FC (efficienza aerobica)
+# GRAFICO 2 – Passo vs FC
 # ==========================================================
 st.subheader("💓 Efficienza Aerobica (Passo vs FC)")
 
@@ -167,33 +181,54 @@ fig2.update_yaxes(autorange="reversed")
 st.plotly_chart(fig2, width="stretch")
 
 # ==========================================================
-# GRAFICO 3 – Velocità equivalente nel tempo
+# GRAFICO 3 – Velocità equivalente
 # ==========================================================
 st.subheader("⛰️ Velocità Equivalente (per trail)")
 
-trend_vel = safe_trendline(x_days, df["Vel_eq"])
+x_days = (df["Data"] - df["Data"].min()).dt.days.values
+trend_vel = safe_trendline(x_days, df["Vel_eq"].values)
 
 fig3 = go.Figure()
-fig3.add_trace(go.Scatter(x=df["Data"], y=df["Vel_eq"], mode="markers+lines", name="Vel_eq"))
+fig3.add_trace(go.Scatter(
+    x=df["Data"],
+    y=df["Vel_eq"],
+    mode="markers+lines",
+    name="Vel_eq"
+))
 
 if trend_vel is not None:
-    fig3.add_trace(go.Scatter(x=df["Data"], y=trend_vel, name="Trend", line=dict(color="orange", dash="dash")))
+    fig3.add_trace(go.Scatter(
+        x=df["Data"],
+        y=trend_vel,
+        name="Trend",
+        line=dict(color="orange", dash="dash")
+    ))
 
 fig3.update_layout(template="plotly_dark")
 st.plotly_chart(fig3, width="stretch")
 
 # ==========================================================
-# GRAFICO 4 – Efficienza metabolica (TE / Tempo)
+# GRAFICO 4 – Efficienza metabolica
 # ==========================================================
 st.subheader("🔥 Efficienza Metabolica (TE / Tempo)")
 
-trend_te = safe_trendline(x_days, df["Eff_TE"])
+trend_te = safe_trendline(x_days, df["Eff_TE"].values)
 
 fig4 = go.Figure()
-fig4.add_trace(go.Scatter(x=df["Data"], y=df["Eff_TE"], mode="markers+lines", name="Efficienza TE"))
+fig4.add_trace(go.Scatter(
+    x=df["Data"],
+    y=df["Eff_TE"],
+    mode="markers+lines",
+    name="Efficienza TE"
+))
 
 if trend_te is not None:
-    fig4.add_trace(go.Scatter(x=df["Data"], y=trend_te, name="Trend", line=dict(color="green", dash="dash")))
+    fig4.add_trace(go.Scatter(
+        x=df["Data"],
+        y=trend_te,
+        name="Trend",
+        line=dict(color="green", dash="dash")
+    ))
 
 fig4.update_layout(template="plotly_dark")
 st.plotly_chart(fig4, width="stretch")
@@ -204,6 +239,5 @@ st.plotly_chart(fig4, width="stretch")
 st.subheader("📋 Tabella completa delle metriche")
 st.dataframe(df[[
     "Data", "Tipo di attivita", "Distanza", "Ascesa totale",
-    "Tempo_Minuti", "FC Media", "Velocità_kmh", "Eff_FC",
-    "Vel_eq", "Eff_TE"
+    "Tempo_Minuti", "FC Media", "Velocità_kmh", "Vel_eq", "Eff_TE"
 ]], use_container_width=True)
